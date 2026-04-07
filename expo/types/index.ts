@@ -18,6 +18,8 @@ export interface Clue {
   id: string;
   event_id: string;
   clue_text: string;
+  hint?: string | null;
+  order_number?: number | null;
   media_url?: string | null;
   media_type?: 'image' | 'video' | 'audio' | null;
   release_time: string;

@@ -22,6 +22,7 @@ export default function EditClueScreen() {
   const { id, eventId } = useLocalSearchParams<{ id: string; eventId: string }>();
 
   const [text, setText] = useState<string>('');
+  const [hint, setHint] = useState<string>('');
 
 
   const clueQuery = useQuery({
@@ -42,17 +43,24 @@ export default function EditClueScreen() {
   useEffect(() => {
     if (clueQuery.data) {
       setText(clueQuery.data.clue_text);
+      setHint(clueQuery.data.hint ?? '');
     }
   }, [clueQuery.data]);
 
   const updateMutation = useMutation({
     mutationFn: async () => {
       console.log('[EditClue] Updating clue:', id);
+      const updatePayload: Record<string, unknown> = {
+        clue_text: text.trim(),
+      };
+      if (hint.trim()) {
+        updatePayload.hint = hint.trim();
+      } else {
+        updatePayload.hint = null;
+      }
       const { error } = await supabase
         .from('clues')
-        .update({
-          clue_text: text.trim(),
-        })
+        .update(updatePayload)
         .eq('id', id);
       if (error) throw error;
     },
@@ -108,6 +116,17 @@ export default function EditClueScreen() {
               placeholder="Enter clue text..."
               placeholderTextColor={Colors.textMuted}
               multiline
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>HINT (OPTIONAL)</Text>
+            <TextInput
+              style={styles.input}
+              value={hint}
+              onChangeText={setHint}
+              placeholder="Hint shown to players who need help"
+              placeholderTextColor={Colors.textMuted}
             />
           </View>
 

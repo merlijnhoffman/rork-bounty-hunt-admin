@@ -158,6 +158,7 @@ export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [clueText, setClueText] = useState<string>('');
+  const [clueHint, setClueHint] = useState<string>('');
   const [mediaAttachment, setMediaAttachment] = useState<MediaAttachment | null>(null);
 
 
@@ -191,7 +192,7 @@ export default function EventDetailScreen() {
         .from('clues')
         .select('*')
         .eq('event_id', id)
-        .order('created_at', { ascending: true });
+        .order('order_number', { ascending: true });
       if (error) throw error;
       return data as Clue[];
     },
@@ -386,13 +387,17 @@ export default function EventDetailScreen() {
       const cluePayload: Record<string, unknown> = {
         event_id: id,
         clue_text: clueText.trim(),
-        clue_order: nextOrder,
+        order_number: nextOrder,
         release_time: new Date().toISOString(),
       };
 
       if (mediaUrl) {
         cluePayload.media_url = mediaUrl;
         cluePayload.media_type = mediaType;
+      }
+
+      if (clueHint.trim()) {
+        cluePayload.hint = clueHint.trim();
       }
 
       if (clueZoneEnabled && clueZoneLat && clueZoneLng) {
@@ -445,6 +450,7 @@ export default function EventDetailScreen() {
     },
     onSuccess: () => {
       setClueText('');
+      setClueHint('');
       setMediaAttachment(null);
       setClueZoneEnabled(false);
       setClueZoneLat('');
@@ -712,6 +718,14 @@ export default function EventDetailScreen() {
             multiline
           />
 
+          <TextInput
+            style={detailStyles.input}
+            value={clueHint}
+            onChangeText={setClueHint}
+            placeholder="Hint (optional, shown to players who need help)"
+            placeholderTextColor={Colors.textMuted}
+          />
+
           {mediaAttachment && (
             <MediaPreview
               attachment={mediaAttachment}
@@ -971,6 +985,9 @@ export default function EventDetailScreen() {
                 </View>
                 {clue.clue_text ? (
                   <Text style={detailStyles.clueText}>{clue.clue_text}</Text>
+                ) : null}
+                {clue.hint ? (
+                  <Text style={detailStyles.clueHintText}>Hint: {clue.hint}</Text>
                 ) : null}
                 <ClueMediaDisplay clue={clue} />
                 {(clue.zone_latitude && clue.zone_longitude) ? (
@@ -1460,6 +1477,12 @@ const detailStyles = StyleSheet.create({
     color: Colors.white,
     fontSize: 14,
     lineHeight: 20,
+  },
+  clueHintText: {
+    color: Colors.amber,
+    fontSize: 13,
+    fontStyle: 'italic' as const,
+    lineHeight: 18,
   },
   clueMediaImage: {
     width: '100%',
