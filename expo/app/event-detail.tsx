@@ -160,10 +160,6 @@ export default function EventDetailScreen() {
   const [clueText, setClueText] = useState<string>('');
   const [mediaAttachment, setMediaAttachment] = useState<MediaAttachment | null>(null);
 
-  const [zoneLat, setZoneLat] = useState<string>('');
-  const [zoneLng, setZoneLng] = useState<string>('');
-  const [zoneRadius, setZoneRadius] = useState<string>('');
-  const [zoneEditing, setZoneEditing] = useState<boolean>(false);
 
   const [clueZoneLat, setClueZoneLat] = useState<string>('');
   const [clueZoneLng, setClueZoneLng] = useState<string>('');
@@ -480,27 +476,6 @@ export default function EventDetailScreen() {
     },
   });
 
-  const zoneUpdateMutation = useMutation({
-    mutationFn: async () => {
-      const zoneData: Record<string, unknown> = {};
-      if (zoneLat) zoneData.zone_latitude = parseFloat(zoneLat);
-      if (zoneLng) zoneData.zone_longitude = parseFloat(zoneLng);
-      if (zoneRadius) zoneData.zone_radius = parseFloat(zoneRadius);
-      if (Object.keys(zoneData).length === 0) return;
-      const { error } = await supabase
-        .from('events')
-        .update(zoneData)
-        .eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      setZoneEditing(false);
-      void queryClient.invalidateQueries({ queryKey: ['event', id] });
-    },
-    onError: (error: Error) => {
-      Alert.alert('Error', error.message);
-    },
-  });
 
   const resetMutation = useMutation({
     mutationFn: async () => {
@@ -566,14 +541,6 @@ export default function EventDetailScreen() {
     ]);
   }, [deleteClueMutation]);
 
-  const handleEditZone = useCallback(() => {
-    if (eventQuery.data) {
-      setZoneLat(eventQuery.data.zone_latitude != null ? String(eventQuery.data.zone_latitude) : '');
-      setZoneLng(eventQuery.data.zone_longitude != null ? String(eventQuery.data.zone_longitude) : '');
-      setZoneRadius(eventQuery.data.zone_radius != null ? String(eventQuery.data.zone_radius) : '');
-      setZoneEditing(true);
-    }
-  }, [eventQuery.data]);
 
   const canSendClue = clueText.trim().length > 0 || mediaAttachment !== null || (clueZoneEnabled && clueZoneLat && clueZoneLng);
 
@@ -973,216 +940,6 @@ export default function EventDetailScreen() {
             )}
           </TouchableOpacity>
         </View>
-
-        <View style={detailStyles.sectionHeader}>
-          <Text style={detailStyles.sectionTitle}>ZONE CONTROL</Text>
-          {!zoneEditing && (
-            <TouchableOpacity onPress={handleEditZone}>
-              <Edit3 size={16} color={Colors.cyan} />
-            </TouchableOpacity>
-          )}
-        </View>
-        {zoneEditing ? (
-          <View style={detailStyles.zoneForm}>
-            {Platform.OS !== 'web' ? (
-              <View style={detailStyles.mapEditorContainer}>
-                <MapView
-                  style={detailStyles.mapEditor}
-                  initialRegion={{
-                    latitude: parseFloat(zoneLat) || 53.3498,
-                    longitude: parseFloat(zoneLng) || -6.2603,
-                    latitudeDelta: ((parseFloat(zoneRadius) || 500) / 111320) * 4,
-                    longitudeDelta: ((parseFloat(zoneRadius) || 500) / 111320) * 4,
-                  }}
-                  onPress={(e: MapPressEvent) => {
-                    const { latitude, longitude } = e.nativeEvent.coordinate;
-                    console.log('[ZoneEditor] Map tapped:', latitude, longitude);
-                    setZoneLat(String(latitude));
-                    setZoneLng(String(longitude));
-                  }}
-                  testID="zone-map-editor"
-                >
-                  {zoneLat && zoneLng && parseFloat(zoneLat) !== 0 && (
-                    <>
-                      <Marker
-                        coordinate={{
-                          latitude: parseFloat(zoneLat),
-                          longitude: parseFloat(zoneLng),
-                        }}
-                        draggable
-                        onDragEnd={(e) => {
-                          const { latitude, longitude } = e.nativeEvent.coordinate;
-                          console.log('[ZoneEditor] Marker dragged to:', latitude, longitude);
-                          setZoneLat(String(latitude));
-                          setZoneLng(String(longitude));
-                        }}
-                      />
-                      <Circle
-                        center={{
-                          latitude: parseFloat(zoneLat),
-                          longitude: parseFloat(zoneLng),
-                        }}
-                        radius={parseFloat(zoneRadius) || 500}
-                        strokeColor="rgba(0, 212, 255, 0.8)"
-                        fillColor="rgba(0, 212, 255, 0.12)"
-                        strokeWidth={2}
-                      />
-                    </>
-                  )}
-                </MapView>
-                <View style={detailStyles.mapOverlayHint}>
-                  <Crosshair size={12} color={Colors.cyan} />
-                  <Text style={detailStyles.mapOverlayHintText}>Tap to set center · Drag marker to adjust</Text>
-                </View>
-              </View>
-            ) : (
-              <View style={detailStyles.mapWebFallback}>
-                <MapPin size={24} color={Colors.cyan} />
-                <Text style={detailStyles.mapWebFallbackTitle}>Zone Editor</Text>
-                <Text style={detailStyles.mapWebFallbackSub}>Enter coordinates manually below</Text>
-              </View>
-            )}
-
-            {Platform.OS === 'web' && (
-              <View style={detailStyles.webCoordsRow}>
-                <View style={detailStyles.webCoordField}>
-                  <Text style={detailStyles.zoneLabel}>LATITUDE</Text>
-                  <TextInput
-                    style={detailStyles.input}
-                    value={zoneLat}
-                    onChangeText={setZoneLat}
-                    placeholder="e.g. 53.3498"
-                    placeholderTextColor={Colors.textMuted}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-                <View style={detailStyles.webCoordField}>
-                  <Text style={detailStyles.zoneLabel}>LONGITUDE</Text>
-                  <TextInput
-                    style={detailStyles.input}
-                    value={zoneLng}
-                    onChangeText={setZoneLng}
-                    placeholder="e.g. -6.2603"
-                    placeholderTextColor={Colors.textMuted}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-              </View>
-            )}
-
-            <View style={detailStyles.radiusControl}>
-              <Text style={detailStyles.zoneLabel}>RADIUS</Text>
-              <View style={detailStyles.radiusRow}>
-                <TouchableOpacity
-                  style={detailStyles.radiusBtn}
-                  onPress={() => {
-                    const current = parseFloat(zoneRadius) || 500;
-                    const step = current > 1000 ? 500 : current > 200 ? 100 : 50;
-                    setZoneRadius(String(Math.max(50, current - step)));
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Minus size={16} color={Colors.cyan} />
-                </TouchableOpacity>
-                <View style={detailStyles.radiusValueContainer}>
-                  <Text style={detailStyles.radiusValue}>{parseFloat(zoneRadius) || 500}</Text>
-                  <Text style={detailStyles.radiusUnit}>meters</Text>
-                </View>
-                <TouchableOpacity
-                  style={detailStyles.radiusBtn}
-                  onPress={() => {
-                    const current = parseFloat(zoneRadius) || 500;
-                    const step = current >= 1000 ? 500 : current >= 200 ? 100 : 50;
-                    setZoneRadius(String(current + step));
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Plus size={16} color={Colors.cyan} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {Platform.OS !== 'web' && (
-              <View style={detailStyles.coordDisplay}>
-                <View style={detailStyles.coordItem}>
-                  <Text style={detailStyles.coordLabel}>LAT</Text>
-                  <Text style={detailStyles.coordValue}>{parseFloat(zoneLat)?.toFixed(6) || '—'}</Text>
-                </View>
-                <View style={detailStyles.coordDivider} />
-                <View style={detailStyles.coordItem}>
-                  <Text style={detailStyles.coordLabel}>LNG</Text>
-                  <Text style={detailStyles.coordValue}>{parseFloat(zoneLng)?.toFixed(6) || '—'}</Text>
-                </View>
-              </View>
-            )}
-
-            <View style={detailStyles.zoneActions}>
-              <TouchableOpacity
-                style={detailStyles.zoneCancelButton}
-                onPress={() => setZoneEditing(false)}
-              >
-                <Text style={detailStyles.zoneCancelText}>CANCEL</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={detailStyles.zoneSaveButton}
-                onPress={() => zoneUpdateMutation.mutate()}
-                disabled={zoneUpdateMutation.isPending}
-              >
-                {zoneUpdateMutation.isPending ? (
-                  <ActivityIndicator color={Colors.bg} size="small" />
-                ) : (
-                  <Text style={detailStyles.zoneSaveText}>SAVE ZONE</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          <View style={detailStyles.zoneInfo}>
-            {Platform.OS !== 'web' && event.zone_latitude && event.zone_longitude ? (
-              <View style={detailStyles.zoneMapPreview}>
-                <MapView
-                  style={detailStyles.zoneMapPreviewMap}
-                  scrollEnabled={false}
-                  zoomEnabled={false}
-                  rotateEnabled={false}
-                  pitchEnabled={false}
-                  initialRegion={{
-                    latitude: event.zone_latitude,
-                    longitude: event.zone_longitude,
-                    latitudeDelta: ((event.zone_radius ?? 500) / 111320) * 4,
-                    longitudeDelta: ((event.zone_radius ?? 500) / 111320) * 4,
-                  }}
-                >
-                  <Circle
-                    center={{
-                      latitude: event.zone_latitude,
-                      longitude: event.zone_longitude,
-                    }}
-                    radius={event.zone_radius ?? 500}
-                    strokeColor="rgba(0, 212, 255, 0.8)"
-                    fillColor="rgba(0, 212, 255, 0.12)"
-                    strokeWidth={2}
-                  />
-                  <Marker
-                    coordinate={{
-                      latitude: event.zone_latitude,
-                      longitude: event.zone_longitude,
-                    }}
-                  />
-                </MapView>
-              </View>
-            ) : null}
-            <View style={detailStyles.zoneInfoDetails}>
-              <View style={detailStyles.zoneInfoRow}>
-                <MapPin size={14} color={Colors.cyan} />
-                <Text style={detailStyles.zoneInfoText}>
-                  {event.zone_latitude?.toFixed(4)}, {event.zone_longitude?.toFixed(4)}
-                </Text>
-              </View>
-              <Text style={detailStyles.zoneInfoText}>Radius: {event.zone_radius}m</Text>
-            </View>
-          </View>
-        )}
 
         <Text style={detailStyles.sectionTitle}>CLUE HISTORY</Text>
         {cluesQuery.isLoading ? (
