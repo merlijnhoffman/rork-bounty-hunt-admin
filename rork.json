@@ -1,0 +1,15 @@
+{
+  "$schema": "https://rork.com/schema/rork.json",
+  "apps": [
+    {
+      "name": "Bounty Hunt Admin",
+      "path": "expo",
+      "framework": "react-native"
+    },
+    {
+      "name": "Bounty Hunt Admin",
+      "path": "expo",
+      "framework": "react-native"
+    }
+  ]
+}
