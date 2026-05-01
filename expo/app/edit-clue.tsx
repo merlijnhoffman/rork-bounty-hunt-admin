@@ -9,7 +9,9 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
+import { Minus, Plus } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -23,6 +25,8 @@ export default function EditClueScreen() {
 
   const [text, setText] = useState<string>('');
   const [hint, setHint] = useState<string>('');
+  const [hasZone, setHasZone] = useState<boolean>(false);
+  const [revealPercent, setRevealPercent] = useState<string>('100');
 
 
   const clueQuery = useQuery({
@@ -42,8 +46,12 @@ export default function EditClueScreen() {
 
   useEffect(() => {
     if (clueQuery.data) {
-      setText(clueQuery.data.clue_text);
-      setHint(clueQuery.data.hint ?? '');
+      const c = clueQuery.data;
+      setText(c.clue_text);
+      setHint(c.hint ?? '');
+      setHasZone(!!(c.zone_latitude && c.zone_longitude));
+      const p = c.zone_reveal_percent ?? c.zone_visible_percent ?? c.zone_percent ?? c.reveal_percent;
+      setRevealPercent(typeof p === 'number' ? String(p) : '100');
     }
   }, [clueQuery.data]);
 
@@ -58,10 +66,31 @@ export default function EditClueScreen() {
       } else {
         updatePayload.hint = null;
       }
-      const { error } = await supabase
-        .from('clues')
-        .update(updatePayload)
-        .eq('id', id);
+
+      if (hasZone) {
+        const percentNum = Math.max(0, Math.min(100, parseFloat(revealPercent) || 100));
+        updatePayload.zone_reveal_percent = percentNum;
+        updatePayload.zone_visible_percent = percentNum;
+        updatePayload.zone_percent = percentNum;
+        updatePayload.reveal_percent = percentNum;
+      }
+
+      const tryUpdate = async (payload: Record<string, unknown>) => {
+        return supabase.from('clues').update(payload).eq('id', id);
+      };
+
+      let { error } = await tryUpdate(updatePayload);
+
+      const percentColumns = ['zone_reveal_percent', 'zone_visible_percent', 'zone_percent', 'reveal_percent'] as const;
+      for (const col of percentColumns) {
+        if (error && new RegExp(col, 'i').test(error.message) && /column|schema cache/i.test(error.message)) {
+          console.warn(`[EditClue] ${col} column missing, retrying without it`);
+          delete updatePayload[col];
+          const retry = await tryUpdate(updatePayload);
+          error = retry.error;
+        }
+      }
+
       if (error) throw error;
     },
     onSuccess: () => {
@@ -130,6 +159,59 @@ export default function EditClueScreen() {
             />
           </View>
 
+          {hasZone && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>ZONE REVEAL %</Text>
+              <View style={styles.percentRow}>
+                <TouchableOpacity
+                  style={styles.percentBtn}
+                  onPress={() => {
+                    const current = parseFloat(revealPercent);
+                    const safe = isNaN(current) ? 100 : current;
+                    setRevealPercent(String(Math.max(0, safe - 5)));
+                  }}
+                  activeOpacity={0.7}
+                  testID="decrease-percent-button"
+                >
+                  <Minus size={16} color={Colors.cyan} />
+                </TouchableOpacity>
+                <View style={styles.percentValueContainer}>
+                  <TextInput
+                    style={styles.percentInput}
+                    value={revealPercent}
+                    onChangeText={(t) => {
+                      const cleaned = t.replace(/[^0-9]/g, '');
+                      if (cleaned === '') { setRevealPercent(''); return; }
+                      const n = Math.max(0, Math.min(100, parseInt(cleaned, 10)));
+                      setRevealPercent(String(n));
+                    }}
+                    onBlur={() => {
+                      if (!revealPercent) setRevealPercent('100');
+                    }}
+                    keyboardType="number-pad"
+                    maxLength={3}
+                    placeholder="100"
+                    placeholderTextColor={Colors.textMuted}
+                    testID="percent-input"
+                  />
+                  <Text style={styles.percentUnit}>% shown</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.percentBtn}
+                  onPress={() => {
+                    const current = parseFloat(revealPercent);
+                    const safe = isNaN(current) ? 100 : current;
+                    setRevealPercent(String(Math.min(100, safe + 5)));
+                  }}
+                  activeOpacity={0.7}
+                  testID="increase-percent-button"
+                >
+                  <Plus size={16} color={Colors.cyan} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           <TouchableOpacity
             style={[styles.saveButton, !text.trim() && styles.buttonDisabled]}
             onPress={() => updateMutation.mutate()}
@@ -196,6 +278,43 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.4,
+  },
+  percentRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+    backgroundColor: Colors.inputBg,
+    borderWidth: 1,
+    borderColor: Colors.inputBorder,
+    borderRadius: 10,
+    padding: 8,
+  },
+  percentBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: Colors.cyanDim,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 212, 255, 0.3)',
+  },
+  percentValueContainer: {
+    flex: 1,
+    alignItems: 'center' as const,
+  },
+  percentInput: {
+    color: Colors.white,
+    fontSize: 22,
+    fontWeight: '700' as const,
+    textAlign: 'center' as const,
+    minWidth: 60,
+    paddingVertical: 0,
+  },
+  percentUnit: {
+    color: Colors.textSecondary,
+    fontSize: 11,
+    letterSpacing: 1,
   },
   saveButtonText: {
     color: Colors.bg,

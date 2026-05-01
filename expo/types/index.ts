@@ -28,6 +28,10 @@ export interface Clue {
   zone_longitude?: number | null;
   zone_radius?: number | null;
   zone_name?: string | null;
+  zone_reveal_percent?: number | null;
+  zone_visible_percent?: number | null;
+  zone_percent?: number | null;
+  reveal_percent?: number | null;
 }
 
 export interface Ticket {

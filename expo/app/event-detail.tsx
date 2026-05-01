@@ -166,6 +166,7 @@ export default function EventDetailScreen() {
   const [clueZoneLng, setClueZoneLng] = useState<string>('');
   const [clueZoneRadius, setClueZoneRadius] = useState<string>('500');
   const [clueZoneName, setClueZoneName] = useState<string>('');
+  const [clueZoneRevealPercent, setClueZoneRevealPercent] = useState<string>('100');
   const [clueZoneEnabled, setClueZoneEnabled] = useState<boolean>(false);
   const [clueZoneMapVisible, setClueZoneMapVisible] = useState<boolean>(false);
 
@@ -417,7 +418,12 @@ export default function EventDetailScreen() {
         if (clueZoneName.trim()) {
           cluePayload.zone_name = clueZoneName.trim();
         }
-        console.log('[EventDetail] Clue zone data:', { lat: cluePayload.zone_latitude, lng: cluePayload.zone_longitude, radius: cluePayload.zone_radius, name: cluePayload.zone_name });
+        const percentNum = Math.max(0, Math.min(100, parseFloat(clueZoneRevealPercent) || 100));
+        cluePayload.zone_reveal_percent = percentNum;
+        cluePayload.zone_visible_percent = percentNum;
+        cluePayload.zone_percent = percentNum;
+        cluePayload.reveal_percent = percentNum;
+        console.log('[EventDetail] Clue zone data:', { lat: cluePayload.zone_latitude, lng: cluePayload.zone_longitude, radius: cluePayload.zone_radius, name: cluePayload.zone_name, percent: percentNum });
       }
 
       console.log('[EventDetail] Clue payload:', JSON.stringify(cluePayload));
@@ -452,6 +458,17 @@ export default function EventDetailScreen() {
         const retry = await tryInsert(rest);
         data = retry.data;
         error = retry.error;
+      }
+
+      const percentColumns = ['zone_reveal_percent', 'zone_visible_percent', 'zone_percent', 'reveal_percent'] as const;
+      for (const col of percentColumns) {
+        if (error && new RegExp(`'${col}'|"${col}"|${col}`, 'i').test(error.message) && /column|schema cache/i.test(error.message)) {
+          console.warn(`[EventDetail] ${col} column missing, retrying without it`);
+          delete (cluePayload as Record<string, unknown>)[col];
+          const retry = await tryInsert(cluePayload);
+          data = retry.data;
+          error = retry.error;
+        }
       }
 
       if (error && /zone_(latitude|longitude|radius|name)/i.test(error.message)) {
@@ -521,6 +538,17 @@ export default function EventDetailScreen() {
           console.log('[EventDetail] Retry REST clue insert response (hint):', res.status, resBody);
         }
 
+        for (const col of ['zone_reveal_percent', 'zone_visible_percent', 'zone_percent', 'reveal_percent']) {
+          if (!res.ok && new RegExp(col, 'i').test(resBody) && /column|schema cache/i.test(resBody)) {
+            console.warn(`[EventDetail] REST insert: ${col} missing, retrying without it`);
+            delete (cluePayload as Record<string, unknown>)[col];
+            const retry = await doFetch(cluePayload);
+            res = retry.res;
+            resBody = retry.resBody;
+            console.log(`[EventDetail] Retry REST clue insert response (${col}):`, res.status, resBody);
+          }
+        }
+
         if (!res.ok && /zone_(latitude|longitude|radius|name)/i.test(resBody)) {
           console.warn('[EventDetail] REST insert: zone columns missing, retrying without them');
           delete (cluePayload as Record<string, unknown>).zone_latitude;
@@ -552,6 +580,7 @@ export default function EventDetailScreen() {
       setClueZoneLng('');
       setClueZoneRadius('500');
       setClueZoneName('');
+      setClueZoneRevealPercent('100');
       setClueZoneMapVisible(false);
       void queryClient.invalidateQueries({ queryKey: ['clues', id] });
     },
@@ -1011,6 +1040,57 @@ export default function EventDetailScreen() {
                 </View>
               </View>
 
+              <View style={detailStyles.radiusControl}>
+                <Text style={detailStyles.zoneLabel}>ZONE REVEAL %</Text>
+                <View style={detailStyles.radiusRow}>
+                  <TouchableOpacity
+                    style={detailStyles.radiusBtn}
+                    onPress={() => {
+                      const current = parseFloat(clueZoneRevealPercent);
+                      const safe = isNaN(current) ? 100 : current;
+                      setClueZoneRevealPercent(String(Math.max(0, safe - 5)));
+                    }}
+                    activeOpacity={0.7}
+                    testID="decrease-percent-button"
+                  >
+                    <Minus size={16} color={Colors.cyan} />
+                  </TouchableOpacity>
+                  <View style={detailStyles.radiusValueContainer}>
+                    <TextInput
+                      style={detailStyles.percentInput}
+                      value={clueZoneRevealPercent}
+                      onChangeText={(t) => {
+                        const cleaned = t.replace(/[^0-9]/g, '');
+                        if (cleaned === '') { setClueZoneRevealPercent(''); return; }
+                        const n = Math.max(0, Math.min(100, parseInt(cleaned, 10)));
+                        setClueZoneRevealPercent(String(n));
+                      }}
+                      onBlur={() => {
+                        if (!clueZoneRevealPercent) setClueZoneRevealPercent('100');
+                      }}
+                      keyboardType="number-pad"
+                      maxLength={3}
+                      placeholder="100"
+                      placeholderTextColor={Colors.textMuted}
+                      testID="percent-input"
+                    />
+                    <Text style={detailStyles.radiusUnit}>% shown</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={detailStyles.radiusBtn}
+                    onPress={() => {
+                      const current = parseFloat(clueZoneRevealPercent);
+                      const safe = isNaN(current) ? 100 : current;
+                      setClueZoneRevealPercent(String(Math.min(100, safe + 5)));
+                    }}
+                    activeOpacity={0.7}
+                    testID="increase-percent-button"
+                  >
+                    <Plus size={16} color={Colors.cyan} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
               {Platform.OS !== 'web' && clueZoneLat && clueZoneLng && (
                 <View style={detailStyles.coordDisplay}>
                   <View style={detailStyles.coordItem}>
@@ -1091,6 +1171,10 @@ export default function EventDetailScreen() {
                     <Text style={detailStyles.clueZoneTagText}>
                       {clue.zone_name ? clue.zone_name : `${clue.zone_latitude?.toFixed(4)}, ${clue.zone_longitude?.toFixed(4)}`}
                       {clue.zone_radius ? ` · ${clue.zone_radius}m` : ''}
+                      {(() => {
+                        const p = clue.zone_reveal_percent ?? clue.zone_visible_percent ?? clue.zone_percent ?? clue.reveal_percent;
+                        return typeof p === 'number' ? ` · ${p}%` : '';
+                      })()}
                     </Text>
                   </View>
                 ) : null}
@@ -1432,6 +1516,14 @@ const detailStyles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700' as const,
     color: Colors.white,
+  },
+  percentInput: {
+    color: Colors.white,
+    fontSize: 22,
+    fontWeight: '700' as const,
+    textAlign: 'center' as const,
+    minWidth: 60,
+    paddingVertical: 0,
   },
   radiusUnit: {
     fontSize: 10,
