@@ -445,6 +445,27 @@ export default function EventDetailScreen() {
         error = retry.error;
       }
 
+      if (error && /'hint'/i.test(error.message)) {
+        console.warn('[EventDetail] hint column missing, retrying without it');
+        const { hint: _omit, ...rest } = cluePayload as { hint?: string } & Record<string, unknown>;
+        delete (cluePayload as Record<string, unknown>).hint;
+        const retry = await tryInsert(rest);
+        data = retry.data;
+        error = retry.error;
+      }
+
+      if (error && /zone_(latitude|longitude|radius|name)/i.test(error.message)) {
+        console.warn('[EventDetail] zone columns missing on clues, retrying without them');
+        const { zone_latitude: _z1, zone_longitude: _z2, zone_radius: _z3, zone_name: _z4, ...rest } = cluePayload as { zone_latitude?: number; zone_longitude?: number; zone_radius?: number; zone_name?: string } & Record<string, unknown>;
+        delete (cluePayload as Record<string, unknown>).zone_latitude;
+        delete (cluePayload as Record<string, unknown>).zone_longitude;
+        delete (cluePayload as Record<string, unknown>).zone_radius;
+        delete (cluePayload as Record<string, unknown>).zone_name;
+        const retry = await tryInsert(rest);
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (error) {
         console.log('[EventDetail] Supabase client insert failed:', error.message, '- trying direct REST');
 
@@ -489,6 +510,27 @@ export default function EventDetailScreen() {
           res = retry.res;
           resBody = retry.resBody;
           console.log('[EventDetail] Retry REST clue insert response (clue_order):', res.status, resBody);
+        }
+
+        if (!res.ok && /'hint'/i.test(resBody)) {
+          console.warn('[EventDetail] REST insert: hint missing, retrying without it');
+          delete (cluePayload as Record<string, unknown>).hint;
+          const retry = await doFetch(cluePayload);
+          res = retry.res;
+          resBody = retry.resBody;
+          console.log('[EventDetail] Retry REST clue insert response (hint):', res.status, resBody);
+        }
+
+        if (!res.ok && /zone_(latitude|longitude|radius|name)/i.test(resBody)) {
+          console.warn('[EventDetail] REST insert: zone columns missing, retrying without them');
+          delete (cluePayload as Record<string, unknown>).zone_latitude;
+          delete (cluePayload as Record<string, unknown>).zone_longitude;
+          delete (cluePayload as Record<string, unknown>).zone_radius;
+          delete (cluePayload as Record<string, unknown>).zone_name;
+          const retry = await doFetch(cluePayload);
+          res = retry.res;
+          resBody = retry.resBody;
+          console.log('[EventDetail] Retry REST clue insert response (zone):', res.status, resBody);
         }
 
         if (!res.ok) {
