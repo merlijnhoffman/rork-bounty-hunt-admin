@@ -23,7 +23,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         .single();
 
       if (error) {
-        console.error('[Auth] Profile fetch error:', error);
+        console.error('[Auth] Profile fetch error:', JSON.stringify({
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        }));
         setProfile(null);
         setIsAdmin(false);
         return;
@@ -33,7 +38,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setProfile(data as Profile);
       setIsAdmin(data?.is_admin === true);
     } catch (err) {
-      console.error('[Auth] Profile fetch exception:', err);
+      const e = err as Error;
+      console.error('[Auth] Profile fetch exception:', e?.message ?? String(err));
       setProfile(null);
       setIsAdmin(false);
     } finally {
