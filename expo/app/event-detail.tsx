@@ -396,6 +396,7 @@ export default function EventDetailScreen() {
       const cluePayload: Record<string, unknown> = {
         event_id: id,
         clue_text: clueText.trim(),
+        clue_order: nextOrder,
         order_number: nextOrder,
         release_time: new Date().toISOString(),
       };
@@ -436,6 +437,14 @@ export default function EventDetailScreen() {
         error = retry.error;
       }
 
+      if (error && /clue_order/i.test(error.message)) {
+        console.warn('[EventDetail] clue_order column missing, retrying without it');
+        const { clue_order: _omit, ...rest } = cluePayload as { clue_order?: number } & Record<string, unknown>;
+        const retry = await tryInsert(rest);
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (error) {
         console.log('[EventDetail] Supabase client insert failed:', error.message, '- trying direct REST');
 
@@ -471,6 +480,15 @@ export default function EventDetailScreen() {
           res = retry.res;
           resBody = retry.resBody;
           console.log('[EventDetail] Retry REST clue insert response:', res.status, resBody);
+        }
+
+        if (!res.ok && /clue_order/i.test(resBody)) {
+          console.warn('[EventDetail] REST insert: clue_order missing, retrying without it');
+          const { clue_order: _omit, ...rest } = cluePayload as { clue_order?: number } & Record<string, unknown>;
+          const retry = await doFetch(rest);
+          res = retry.res;
+          resBody = retry.resBody;
+          console.log('[EventDetail] Retry REST clue insert response (clue_order):', res.status, resBody);
         }
 
         if (!res.ok) {
