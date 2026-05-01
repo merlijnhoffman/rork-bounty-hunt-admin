@@ -9,19 +9,6 @@ export function redirectSystemPath({
       return '/';
     }
 
-    const knownRoutes = [
-      '/',
-      '/login',
-      '/access-denied',
-      '/dashboard',
-      '/create-event',
-      '/event-detail',
-      '/edit-event',
-      '/edit-clue',
-      '/live-players',
-      '/modal',
-    ];
-
     let normalized = path;
     try {
       if (path.includes('://')) {
@@ -32,25 +19,16 @@ export function redirectSystemPath({
       console.log('[NativeIntent] URL parse failed, using raw path', e);
     }
 
+    normalized = normalized.replace(/^\/--\//, '/');
+
     if (!normalized.startsWith('/')) {
       normalized = '/' + normalized;
     }
 
-    const base = normalized.split('?')[0].split('#')[0].replace(/\/$/, '') || '/';
-
-    const isKnown = knownRoutes.some((route) => {
-      if (route === '/') return base === '/';
-      return base === route || base.startsWith(route + '/');
-    });
-
-    if (!isKnown) {
-      console.log('[NativeIntent] Unknown path, redirecting to /', { base });
-      return '/';
-    }
-
+    console.log('[NativeIntent] resolved', { normalized });
     return normalized;
   } catch (error) {
-    console.log('[NativeIntent] Error, redirecting to /', error);
+    console.log('[NativeIntent] Error, falling back to /', error);
     return '/';
   }
 }
