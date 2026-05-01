@@ -193,7 +193,16 @@ export default function EventDetailScreen() {
         .select('*')
         .eq('event_id', id)
         .order('order_number', { ascending: true });
-      if (error) throw error;
+      if (error) {
+        console.warn('[EventDetail] order_number sort failed, falling back to release_time:', error.message);
+        const fallback = await supabase
+          .from('clues')
+          .select('*')
+          .eq('event_id', id)
+          .order('release_time', { ascending: true });
+        if (fallback.error) throw fallback.error;
+        return fallback.data as Clue[];
+      }
       return data as Clue[];
     },
     enabled: !!id,
@@ -412,7 +421,20 @@ export default function EventDetailScreen() {
 
       console.log('[EventDetail] Clue payload:', JSON.stringify(cluePayload));
 
-      const { data, error } = await supabase.from('clues').insert(cluePayload).select();
+      const tryInsert = async (payload: Record<string, unknown>) => {
+        const { data, error } = await supabase.from('clues').insert(payload).select();
+        return { data, error };
+      };
+
+      let { data, error } = await tryInsert(cluePayload);
+
+      if (error && /order_number/i.test(error.message)) {
+        console.warn('[EventDetail] order_number column missing, retrying without it');
+        const { order_number: _omit, ...rest } = cluePayload as { order_number?: number } & Record<string, unknown>;
+        const retry = await tryInsert(rest);
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) {
         console.log('[EventDetail] Supabase client insert failed:', error.message, '- trying direct REST');
@@ -429,14 +451,27 @@ export default function EventDetailScreen() {
           headers['Authorization'] = `Bearer ${accessToken}`;
         }
 
-        const res = await fetch(`${supabaseUrl}/rest/v1/clues`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(cluePayload),
-        });
+        const doFetch = async (payload: Record<string, unknown>) => {
+          const res = await fetch(`${supabaseUrl}/rest/v1/clues`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload),
+          });
+          const resBody = await res.text();
+          return { res, resBody };
+        };
 
-        const resBody = await res.text();
+        let { res, resBody } = await doFetch(cluePayload);
         console.log('[EventDetail] Direct REST clue insert response:', res.status, resBody);
+
+        if (!res.ok && /order_number/i.test(resBody)) {
+          console.warn('[EventDetail] REST insert: order_number missing, retrying without it');
+          const { order_number: _omit, ...rest } = cluePayload as { order_number?: number } & Record<string, unknown>;
+          const retry = await doFetch(rest);
+          res = retry.res;
+          resBody = retry.resBody;
+          console.log('[EventDetail] Retry REST clue insert response:', res.status, resBody);
+        }
 
         if (!res.ok) {
           throw new Error(
