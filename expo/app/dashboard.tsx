@@ -67,7 +67,7 @@ export default function DashboardScreen() {
   const renderEvent = useCallback(({ item }: { item: Event }) => (
     <TouchableOpacity
       style={styles.card}
-      onPress={() => router.push(`/event-detail?id=${item.id}`)}
+      onPress={() => router.push({ pathname: '/event-detail', params: { id: item.id } })}
       activeOpacity={0.7}
       testID={`event-card-${item.id}`}
     >

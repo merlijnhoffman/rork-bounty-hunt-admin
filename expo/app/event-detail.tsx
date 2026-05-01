@@ -699,10 +699,10 @@ export default function EventDetailScreen() {
           headerTitleStyle: { fontSize: 14, letterSpacing: 2, fontWeight: '700' },
           headerRight: () => (
             <View style={{ flexDirection: 'row', gap: 16, paddingRight: 4 }}>
-              <TouchableOpacity onPress={() => router.push(`/live-players?id=${event.id}`)}>
+              <TouchableOpacity onPress={() => router.push({ pathname: '/live-players', params: { id: event.id } })}>
                 <Users size={20} color={Colors.textSecondary} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => router.push(`/edit-event?id=${event.id}`)}>
+              <TouchableOpacity onPress={() => router.push({ pathname: '/edit-event', params: { id: event.id } })}>
                 <Pencil size={20} color={Colors.textSecondary} />
               </TouchableOpacity>
             </View>
