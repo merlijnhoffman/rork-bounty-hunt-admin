@@ -68,7 +68,7 @@ export default function EditEventScreen() {
         price: parseFloat(price),
         prize_amount: parseFloat(prizeAmount),
       };
-      console.log('[EditEvent] Updating event:', id, 'with data:', JSON.stringify(updateData));
+      if (__DEV__) console.log('[EditEvent] Updating event:', id, 'with data:', JSON.stringify(updateData));
       if (zoneLat) updateData.zone_latitude = parseFloat(zoneLat);
       if (zoneLng) updateData.zone_longitude = parseFloat(zoneLng);
       if (zoneRadius) updateData.zone_radius = parseFloat(zoneRadius);
@@ -77,7 +77,7 @@ export default function EditEventScreen() {
         .from('events')
         .update(updateData)
         .eq('id', id);
-      console.log('[EditEvent] Update response error:', updateError);
+      if (__DEV__) console.log('[EditEvent] Update response error:', updateError);
       if (updateError) throw updateError;
 
       const { data: verify, error: verifyError } = await supabase
@@ -85,18 +85,18 @@ export default function EditEventScreen() {
         .select('*')
         .eq('id', id)
         .single();
-      console.log('[EditEvent] Verification fetch:', JSON.stringify({ verify, verifyError }));
+      if (__DEV__) console.log('[EditEvent] Verification fetch:', JSON.stringify({ verify, verifyError }));
       if (verifyError) throw verifyError;
       return verify as Event;
     },
     onSuccess: async () => {
-      console.log('[EditEvent] Event updated successfully');
+      if (__DEV__) console.log('[EditEvent] Event updated successfully');
       await queryClient.invalidateQueries({ queryKey: ['events'] });
       await queryClient.invalidateQueries({ queryKey: ['event', id] });
       router.back();
     },
     onError: (error: Error) => {
-      console.error('[EditEvent] Error:', error.message);
+      if (__DEV__) console.error('[EditEvent] Error:', error.message);
       Alert.alert('Error', error.message);
     },
   });

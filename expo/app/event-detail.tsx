@@ -125,7 +125,7 @@ async function uploadMediaToSupabase(attachment: MediaAttachment, eventId: strin
   const ext = attachment.fileName.split('.').pop() ?? 'bin';
   const filePath = `clues/${eventId}/${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
 
-  console.log('[Upload] Starting upload:', filePath, 'mimeType:', attachment.mimeType);
+  if (__DEV__) console.log('[Upload] Starting upload:', filePath, 'mimeType:', attachment.mimeType);
 
   const response = await fetch(attachment.uri);
   const blob = await response.blob();
@@ -138,17 +138,17 @@ async function uploadMediaToSupabase(attachment: MediaAttachment, eventId: strin
     });
 
   if (error) {
-    console.error('[Upload] Storage upload error:', error.message);
+    if (__DEV__) console.error('[Upload] Storage upload error:', error.message);
     throw new Error(`Media upload failed: ${error.message}`);
   }
 
-  console.log('[Upload] Upload success:', data.path);
+  if (__DEV__) console.log('[Upload] Upload success:', data.path);
 
   const { data: urlData } = supabase.storage
     .from('clue-media')
     .getPublicUrl(data.path);
 
-  console.log('[Upload] Public URL:', urlData.publicUrl);
+  if (__DEV__) console.log('[Upload] Public URL:', urlData.publicUrl);
   return urlData.publicUrl;
 }
 
@@ -173,7 +173,7 @@ export default function EventDetailScreen() {
   const eventQuery = useQuery({
     queryKey: ['event', id],
     queryFn: async () => {
-      console.log('[EventDetail] Fetching event:', id);
+      if (__DEV__) console.log('[EventDetail] Fetching event:', id);
       const { data, error } = await supabase
         .from('events')
         .select('*')
@@ -188,14 +188,14 @@ export default function EventDetailScreen() {
   const cluesQuery = useQuery({
     queryKey: ['clues', id],
     queryFn: async () => {
-      console.log('[EventDetail] Fetching clues for event:', id);
+      if (__DEV__) console.log('[EventDetail] Fetching clues for event:', id);
       const { data, error } = await supabase
         .from('clues')
         .select('*')
         .eq('event_id', id)
         .order('order_number', { ascending: true });
       if (error) {
-        console.warn('[EventDetail] order_number sort failed, falling back to release_time:', error.message);
+        if (__DEV__) console.warn('[EventDetail] order_number sort failed, falling back to release_time:', error.message);
         const fallback = await supabase
           .from('clues')
           .select('*')
@@ -212,14 +212,14 @@ export default function EventDetailScreen() {
   useEffect(() => {
     if (!id) return;
 
-    console.log('[EventDetail] Setting up real-time subscription for clues and event');
+    if (__DEV__) console.log('[EventDetail] Setting up real-time subscription for clues and event');
     const channel = supabase
       .channel(`admin-event-${id}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'clues', filter: `event_id=eq.${id}` },
         () => {
-          console.log('[EventDetail] Clue change detected, refetching');
+          if (__DEV__) console.log('[EventDetail] Clue change detected, refetching');
           void queryClient.invalidateQueries({ queryKey: ['clues', id] });
         }
       )
@@ -227,21 +227,21 @@ export default function EventDetailScreen() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'events', filter: `id=eq.${id}` },
         () => {
-          console.log('[EventDetail] Event change detected, refetching');
+          if (__DEV__) console.log('[EventDetail] Event change detected, refetching');
           void queryClient.invalidateQueries({ queryKey: ['event', id] });
         }
       )
       .subscribe();
 
     return () => {
-      console.log('[EventDetail] Cleaning up real-time subscription');
+      if (__DEV__) console.log('[EventDetail] Cleaning up real-time subscription');
       void supabase.removeChannel(channel);
     };
   }, [id, queryClient]);
 
   const statusMutation = useMutation({
     mutationFn: async (newStatus: 'live' | 'completed') => {
-      console.log('[EventDetail] Changing status to:', newStatus, 'for event:', id);
+      if (__DEV__) console.log('[EventDetail] Changing status to:', newStatus, 'for event:', id);
 
       const session = await supabase.auth.getSession();
       const accessToken = session.data.session?.access_token;
@@ -307,10 +307,10 @@ export default function EventDetailScreen() {
           fileName,
           mimeType: asset.mimeType ?? 'image/jpeg',
         });
-        console.log('[Media] Image selected:', fileName);
+        if (__DEV__) console.log('[Media] Image selected:', fileName);
       }
     } catch (err) {
-      console.error('[Media] Image pick error:', err);
+      if (__DEV__) console.error('[Media] Image pick error:', err);
       Alert.alert('Error', 'Failed to pick image.');
     }
   }, []);
@@ -337,10 +337,10 @@ export default function EventDetailScreen() {
           fileName,
           mimeType: asset.mimeType ?? 'video/mp4',
         });
-        console.log('[Media] Video selected:', fileName);
+        if (__DEV__) console.log('[Media] Video selected:', fileName);
       }
     } catch (err) {
-      console.error('[Media] Video pick error:', err);
+      if (__DEV__) console.error('[Media] Video pick error:', err);
       Alert.alert('Error', 'Failed to pick video.');
     }
   }, []);
@@ -359,17 +359,17 @@ export default function EventDetailScreen() {
           fileName: asset.name,
           mimeType: asset.mimeType ?? 'audio/mpeg',
         });
-        console.log('[Media] Audio selected:', asset.name);
+        if (__DEV__) console.log('[Media] Audio selected:', asset.name);
       }
     } catch (err) {
-      console.error('[Media] Audio pick error:', err);
+      if (__DEV__) console.error('[Media] Audio pick error:', err);
       Alert.alert('Error', 'Failed to pick audio file.');
     }
   }, []);
 
   const sendClueMutation = useMutation({
     mutationFn: async () => {
-      console.log('[EventDetail] Sending clue for event:', id);
+      if (__DEV__) console.log('[EventDetail] Sending clue for event:', id);
 
       const session = await supabase.auth.getSession();
       const accessToken = session.data.session?.access_token;
@@ -380,16 +380,16 @@ export default function EventDetailScreen() {
         .eq('event_id', id);
       
       if (countError) {
-        console.warn('[EventDetail] Could not count clues, using fallback:', countError.message);
+        if (__DEV__) console.warn('[EventDetail] Could not count clues, using fallback:', countError.message);
       }
       const nextOrder = (count ?? (cluesQuery.data ?? []).length) + 1;
-      console.log('[EventDetail] Next clue order:', nextOrder);
+      if (__DEV__) console.log('[EventDetail] Next clue order:', nextOrder);
 
       let mediaUrl: string | null = null;
       let mediaType: MediaType | null = null;
 
       if (mediaAttachment) {
-        console.log('[EventDetail] Uploading media attachment...');
+        if (__DEV__) console.log('[EventDetail] Uploading media attachment...');
         mediaUrl = await uploadMediaToSupabase(mediaAttachment, id ?? 'unknown');
         mediaType = mediaAttachment.type;
       }
@@ -423,10 +423,10 @@ export default function EventDetailScreen() {
         cluePayload.zone_visible_percent = percentNum;
         cluePayload.zone_percent = percentNum;
         cluePayload.reveal_percent = percentNum;
-        console.log('[EventDetail] Clue zone data:', { lat: cluePayload.zone_latitude, lng: cluePayload.zone_longitude, radius: cluePayload.zone_radius, name: cluePayload.zone_name, percent: percentNum });
+        if (__DEV__) console.log('[EventDetail] Clue zone data:', { lat: cluePayload.zone_latitude, lng: cluePayload.zone_longitude, radius: cluePayload.zone_radius, name: cluePayload.zone_name, percent: percentNum });
       }
 
-      console.log('[EventDetail] Clue payload:', JSON.stringify(cluePayload));
+      if (__DEV__) console.log('[EventDetail] Clue payload:', JSON.stringify(cluePayload));
 
       const tryInsert = async (payload: Record<string, unknown>) => {
         const { data, error } = await supabase.from('clues').insert(payload).select();
@@ -436,7 +436,7 @@ export default function EventDetailScreen() {
       let { data, error } = await tryInsert(cluePayload);
 
       if (error && /order_number/i.test(error.message)) {
-        console.warn('[EventDetail] order_number column missing, retrying without it');
+        if (__DEV__) console.warn('[EventDetail] order_number column missing, retrying without it');
         const { order_number: _omit, ...rest } = cluePayload as { order_number?: number } & Record<string, unknown>;
         const retry = await tryInsert(rest);
         data = retry.data;
@@ -444,7 +444,7 @@ export default function EventDetailScreen() {
       }
 
       if (error && /clue_order/i.test(error.message)) {
-        console.warn('[EventDetail] clue_order column missing, retrying without it');
+        if (__DEV__) console.warn('[EventDetail] clue_order column missing, retrying without it');
         const { clue_order: _omit, ...rest } = cluePayload as { clue_order?: number } & Record<string, unknown>;
         const retry = await tryInsert(rest);
         data = retry.data;
@@ -452,7 +452,7 @@ export default function EventDetailScreen() {
       }
 
       if (error && /'hint'/i.test(error.message)) {
-        console.warn('[EventDetail] hint column missing, retrying without it');
+        if (__DEV__) console.warn('[EventDetail] hint column missing, retrying without it');
         const { hint: _omit, ...rest } = cluePayload as { hint?: string } & Record<string, unknown>;
         delete (cluePayload as Record<string, unknown>).hint;
         const retry = await tryInsert(rest);
@@ -463,7 +463,7 @@ export default function EventDetailScreen() {
       const percentColumns = ['zone_reveal_percent', 'zone_visible_percent', 'zone_percent', 'reveal_percent'] as const;
       for (const col of percentColumns) {
         if (error && new RegExp(`'${col}'|"${col}"|${col}`, 'i').test(error.message) && /column|schema cache/i.test(error.message)) {
-          console.warn(`[EventDetail] ${col} column missing, retrying without it`);
+          if (__DEV__) console.warn(`[EventDetail] ${col} column missing, retrying without it`);
           delete (cluePayload as Record<string, unknown>)[col];
           const retry = await tryInsert(cluePayload);
           data = retry.data;
@@ -472,7 +472,7 @@ export default function EventDetailScreen() {
       }
 
       if (error && /zone_(latitude|longitude|radius|name)/i.test(error.message)) {
-        console.warn('[EventDetail] zone columns missing on clues, retrying without them');
+        if (__DEV__) console.warn('[EventDetail] zone columns missing on clues, retrying without them');
         const { zone_latitude: _z1, zone_longitude: _z2, zone_radius: _z3, zone_name: _z4, ...rest } = cluePayload as { zone_latitude?: number; zone_longitude?: number; zone_radius?: number; zone_name?: string } & Record<string, unknown>;
         delete (cluePayload as Record<string, unknown>).zone_latitude;
         delete (cluePayload as Record<string, unknown>).zone_longitude;
@@ -484,7 +484,7 @@ export default function EventDetailScreen() {
       }
 
       if (error) {
-        console.log('[EventDetail] Supabase client insert failed:', error.message, '- trying direct REST');
+        if (__DEV__) console.log('[EventDetail] Supabase client insert failed:', error.message, '- trying direct REST');
 
         const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
         const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -509,48 +509,48 @@ export default function EventDetailScreen() {
         };
 
         let { res, resBody } = await doFetch(cluePayload);
-        console.log('[EventDetail] Direct REST clue insert response:', res.status, resBody);
+        if (__DEV__) console.log('[EventDetail] Direct REST clue insert response:', res.status, resBody);
 
         if (!res.ok && /order_number/i.test(resBody)) {
-          console.warn('[EventDetail] REST insert: order_number missing, retrying without it');
+          if (__DEV__) console.warn('[EventDetail] REST insert: order_number missing, retrying without it');
           const { order_number: _omit, ...rest } = cluePayload as { order_number?: number } & Record<string, unknown>;
           const retry = await doFetch(rest);
           res = retry.res;
           resBody = retry.resBody;
-          console.log('[EventDetail] Retry REST clue insert response:', res.status, resBody);
+          if (__DEV__) console.log('[EventDetail] Retry REST clue insert response:', res.status, resBody);
         }
 
         if (!res.ok && /clue_order/i.test(resBody)) {
-          console.warn('[EventDetail] REST insert: clue_order missing, retrying without it');
+          if (__DEV__) console.warn('[EventDetail] REST insert: clue_order missing, retrying without it');
           const { clue_order: _omit, ...rest } = cluePayload as { clue_order?: number } & Record<string, unknown>;
           const retry = await doFetch(rest);
           res = retry.res;
           resBody = retry.resBody;
-          console.log('[EventDetail] Retry REST clue insert response (clue_order):', res.status, resBody);
+          if (__DEV__) console.log('[EventDetail] Retry REST clue insert response (clue_order):', res.status, resBody);
         }
 
         if (!res.ok && /'hint'/i.test(resBody)) {
-          console.warn('[EventDetail] REST insert: hint missing, retrying without it');
+          if (__DEV__) console.warn('[EventDetail] REST insert: hint missing, retrying without it');
           delete (cluePayload as Record<string, unknown>).hint;
           const retry = await doFetch(cluePayload);
           res = retry.res;
           resBody = retry.resBody;
-          console.log('[EventDetail] Retry REST clue insert response (hint):', res.status, resBody);
+          if (__DEV__) console.log('[EventDetail] Retry REST clue insert response (hint):', res.status, resBody);
         }
 
         for (const col of ['zone_reveal_percent', 'zone_visible_percent', 'zone_percent', 'reveal_percent']) {
           if (!res.ok && new RegExp(col, 'i').test(resBody) && /column|schema cache/i.test(resBody)) {
-            console.warn(`[EventDetail] REST insert: ${col} missing, retrying without it`);
+            if (__DEV__) console.warn(`[EventDetail] REST insert: ${col} missing, retrying without it`);
             delete (cluePayload as Record<string, unknown>)[col];
             const retry = await doFetch(cluePayload);
             res = retry.res;
             resBody = retry.resBody;
-            console.log(`[EventDetail] Retry REST clue insert response (${col}):`, res.status, resBody);
+            if (__DEV__) console.log(`[EventDetail] Retry REST clue insert response (${col}):`, res.status, resBody);
           }
         }
 
         if (!res.ok && /zone_(latitude|longitude|radius|name)/i.test(resBody)) {
-          console.warn('[EventDetail] REST insert: zone columns missing, retrying without them');
+          if (__DEV__) console.warn('[EventDetail] REST insert: zone columns missing, retrying without them');
           delete (cluePayload as Record<string, unknown>).zone_latitude;
           delete (cluePayload as Record<string, unknown>).zone_longitude;
           delete (cluePayload as Record<string, unknown>).zone_radius;
@@ -558,7 +558,7 @@ export default function EventDetailScreen() {
           const retry = await doFetch(cluePayload);
           res = retry.res;
           resBody = retry.resBody;
-          console.log('[EventDetail] Retry REST clue insert response (zone):', res.status, resBody);
+          if (__DEV__) console.log('[EventDetail] Retry REST clue insert response (zone):', res.status, resBody);
         }
 
         if (!res.ok) {
@@ -568,7 +568,7 @@ export default function EventDetailScreen() {
           );
         }
       } else {
-        console.log('[EventDetail] Clue inserted successfully:', data);
+        if (__DEV__) console.log('[EventDetail] Clue inserted successfully:', data);
       }
     },
     onSuccess: () => {
@@ -591,7 +591,7 @@ export default function EventDetailScreen() {
 
   const deleteClueMutation = useMutation({
     mutationFn: async (clueId: string) => {
-      console.log('[EventDetail] Deleting clue:', clueId);
+      if (__DEV__) console.log('[EventDetail] Deleting clue:', clueId);
       const { error } = await supabase
         .from('clues')
         .delete()

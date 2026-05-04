@@ -3,7 +3,7 @@ export function redirectSystemPath({
   initial,
 }: { path: string; initial: boolean }) {
   try {
-    console.log('[NativeIntent] redirectSystemPath', { path, initial });
+    if (__DEV__) console.log('[NativeIntent] redirectSystemPath', { path, initial });
 
     if (!path || typeof path !== 'string') {
       return '/';
@@ -16,7 +16,7 @@ export function redirectSystemPath({
         normalized = url.pathname + url.search + url.hash;
       }
     } catch (e) {
-      console.log('[NativeIntent] URL parse failed, using raw path', e);
+      if (__DEV__) console.log('[NativeIntent] URL parse failed, using raw path', e);
     }
 
     normalized = normalized.replace(/^\/--\//, '/');
@@ -25,10 +25,10 @@ export function redirectSystemPath({
       normalized = '/' + normalized;
     }
 
-    console.log('[NativeIntent] resolved', { normalized });
+    if (__DEV__) console.log('[NativeIntent] resolved', { normalized });
     return normalized;
   } catch (error) {
-    console.log('[NativeIntent] Error, falling back to /', error);
+    if (__DEV__) console.log('[NativeIntent] Error, falling back to /', error);
     return '/';
   }
 }

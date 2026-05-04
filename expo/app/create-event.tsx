@@ -31,7 +31,7 @@ export default function CreateEventScreen() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      console.log('[CreateEvent] Creating event:', city);
+      if (__DEV__) console.log('[CreateEvent] Creating event:', city);
       const insertData: Record<string, unknown> = {
         city: city.trim(),
         date,
@@ -49,12 +49,12 @@ export default function CreateEventScreen() {
       if (error) throw error;
     },
     onSuccess: () => {
-      console.log('[CreateEvent] Event created successfully');
+      if (__DEV__) console.log('[CreateEvent] Event created successfully');
       void queryClient.invalidateQueries({ queryKey: ['events'] });
       router.back();
     },
     onError: (error: Error) => {
-      console.error('[CreateEvent] Error:', error.message);
+      if (__DEV__) console.error('[CreateEvent] Error:', error.message);
       Alert.alert('Error', error.message);
     },
   });

@@ -43,7 +43,7 @@ export default function LivePlayersScreen() {
   const ticketsQuery = useQuery({
     queryKey: ['tickets', id],
     queryFn: async () => {
-      console.log('[LivePlayers] Fetching tickets for event:', id);
+      if (__DEV__) console.log('[LivePlayers] Fetching tickets for event:', id);
       const { data: tickets, error } = await supabase
         .from('tickets')
         .select('*')
@@ -70,7 +70,7 @@ export default function LivePlayersScreen() {
         userId: t.user_id,
       }));
 
-      console.log('[LivePlayers] Found players:', players.length);
+      if (__DEV__) console.log('[LivePlayers] Found players:', players.length);
       return players;
     },
     enabled: !!id,
@@ -92,14 +92,14 @@ export default function LivePlayersScreen() {
   useEffect(() => {
     if (!id) return;
 
-    console.log('[LivePlayers] Setting up real-time subscription');
+    if (__DEV__) console.log('[LivePlayers] Setting up real-time subscription');
     const channel = supabase
       .channel(`tickets-${id}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tickets', filter: `event_id=eq.${id}` },
         () => {
-          console.log('[LivePlayers] Ticket change detected, refetching');
+          if (__DEV__) console.log('[LivePlayers] Ticket change detected, refetching');
           void queryClient.invalidateQueries({ queryKey: ['tickets', id] });
         }
       )
@@ -107,14 +107,14 @@ export default function LivePlayersScreen() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'player_connections', filter: `event_id=eq.${id}` },
         () => {
-          console.log('[LivePlayers] Connection change detected');
+          if (__DEV__) console.log('[LivePlayers] Connection change detected');
           void queryClient.invalidateQueries({ queryKey: ['connections', id] });
         }
       )
       .subscribe();
 
     return () => {
-      console.log('[LivePlayers] Cleaning up subscription');
+      if (__DEV__) console.log('[LivePlayers] Cleaning up subscription');
       void supabase.removeChannel(channel);
     };
   }, [id, queryClient]);

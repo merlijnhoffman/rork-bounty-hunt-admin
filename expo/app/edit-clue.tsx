@@ -32,7 +32,7 @@ export default function EditClueScreen() {
   const clueQuery = useQuery({
     queryKey: ['clue', id],
     queryFn: async () => {
-      console.log('[EditClue] Fetching clue:', id);
+      if (__DEV__) console.log('[EditClue] Fetching clue:', id);
       const { data, error } = await supabase
         .from('clues')
         .select('*')
@@ -57,7 +57,7 @@ export default function EditClueScreen() {
 
   const updateMutation = useMutation({
     mutationFn: async () => {
-      console.log('[EditClue] Updating clue:', id);
+      if (__DEV__) console.log('[EditClue] Updating clue:', id);
       const updatePayload: Record<string, unknown> = {
         clue_text: text.trim(),
       };
@@ -84,7 +84,7 @@ export default function EditClueScreen() {
       const percentColumns = ['zone_reveal_percent', 'zone_visible_percent', 'zone_percent', 'reveal_percent'] as const;
       for (const col of percentColumns) {
         if (error && new RegExp(col, 'i').test(error.message) && /column|schema cache/i.test(error.message)) {
-          console.warn(`[EditClue] ${col} column missing, retrying without it`);
+          if (__DEV__) console.warn(`[EditClue] ${col} column missing, retrying without it`);
           delete updatePayload[col];
           const retry = await tryUpdate(updatePayload);
           error = retry.error;
@@ -94,7 +94,7 @@ export default function EditClueScreen() {
       if (error) throw error;
     },
     onSuccess: () => {
-      console.log('[EditClue] Clue updated');
+      if (__DEV__) console.log('[EditClue] Clue updated');
       void queryClient.invalidateQueries({ queryKey: ['clues', eventId] });
       router.back();
     },

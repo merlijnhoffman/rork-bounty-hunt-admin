@@ -11,7 +11,7 @@ export default function IndexScreen() {
 
   useEffect(() => {
     const timeout = setTimeout(() => {
-      console.log('[Index] Auth loading timed out');
+      if (__DEV__) console.log('[Index] Auth loading timed out');
       setTimedOut(true);
     }, 8000);
     return () => clearTimeout(timeout);

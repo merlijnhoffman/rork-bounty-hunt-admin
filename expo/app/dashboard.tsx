@@ -41,7 +41,7 @@ export default function DashboardScreen() {
   const eventsQuery = useQuery({
     queryKey: ['events'],
     queryFn: async () => {
-      console.log('[Dashboard] Fetching events');
+      if (__DEV__) console.log('[Dashboard] Fetching events');
       const { data: events, error } = await supabase
         .from('events')
         .select('*')
@@ -59,7 +59,7 @@ export default function DashboardScreen() {
         })
       );
 
-      console.log('[Dashboard] Fetched events:', eventsWithCounts.length);
+      if (__DEV__) console.log('[Dashboard] Fetched events:', eventsWithCounts.length);
       return eventsWithCounts;
     },
   });
