@@ -27,11 +27,11 @@ export default function LoginScreen() {
       await signIn(email.trim(), password);
     },
     onSuccess: () => {
-      console.log('[Login] Success, navigating to index');
+      if (__DEV__) console.log('[Login] Success, navigating to index');
       router.replace('/');
     },
     onError: (error: Error) => {
-      console.error('[Login] Error:', error.message);
+      if (__DEV__) console.error('[Login] Error:', error.message);
       Alert.alert('Sign In Failed', error.message);
     },
   });

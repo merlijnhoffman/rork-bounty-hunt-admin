@@ -4,6 +4,28 @@ import createContextHook from '@nkzw/create-context-hook';
 import { supabase } from '@/lib/supabase';
 import { Profile } from '@/types';
 
+/**
+ * Hardcoded fallback list of admin emails. Used if the profile row cannot be
+ * fetched (for example, due to RLS policies blocking SELECT on `profiles`).
+ * These users will be granted admin access regardless of the database state.
+ */
+const ADMIN_EMAIL_ALLOWLIST: readonly string[] = [
+  'merlijnhoffman@gmail.com',
+] as const;
+
+const isAllowlistedAdmin = (email: string | null | undefined): boolean => {
+  if (!email) return false;
+  return ADMIN_EMAIL_ALLOWLIST.includes(email.trim().toLowerCase());
+};
+
+const log = (...args: unknown[]): void => {
+  if (__DEV__) console.log(...args);
+};
+
+const logError = (...args: unknown[]): void => {
+  if (__DEV__) console.error(...args);
+};
+
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -12,50 +34,53 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [profileLoading, setProfileLoading] = useState<boolean>(false);
 
-  const fetchProfile = useCallback(async (userId: string) => {
+  const fetchProfile = useCallback(async (authUser: User) => {
     setProfileLoading(true);
     try {
-      console.log('[Auth] Fetching profile for user:', userId);
+      log('[Auth] Fetching profile for user');
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', userId)
+        .eq('id', authUser.id)
         .single();
 
+      const allowlisted = isAllowlistedAdmin(authUser.email);
+
       if (error) {
-        console.error('[Auth] Profile fetch error:', JSON.stringify({
+        logError('[Auth] Profile fetch error:', JSON.stringify({
           message: error.message,
           code: error.code,
           details: error.details,
           hint: error.hint,
         }));
         setProfile(null);
-        setIsAdmin(false);
+        // Fall back to the allowlist so RLS issues don't lock out admins.
+        setIsAdmin(allowlisted);
         return;
       }
 
-      console.log('[Auth] Profile fetched:', data?.email, 'isAdmin:', data?.is_admin);
+      log('[Auth] Profile fetched, isAdmin:', data?.is_admin);
       setProfile(data as Profile);
-      setIsAdmin(data?.is_admin === true);
+      setIsAdmin(data?.is_admin === true || allowlisted);
     } catch (err) {
       const e = err as Error;
-      console.error('[Auth] Profile fetch exception:', e?.message ?? String(err));
+      logError('[Auth] Profile fetch exception:', e?.message ?? String(err));
       setProfile(null);
-      setIsAdmin(false);
+      setIsAdmin(isAllowlistedAdmin(authUser.email));
     } finally {
       setProfileLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    console.log('[Auth] Initializing auth listener');
+    log('[Auth] Initializing auth listener');
 
     void supabase.auth.getSession().then(({ data: { session: s } }) => {
-      console.log('[Auth] Initial session:', s?.user?.email ?? 'none');
+      log('[Auth] Initial session loaded');
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) {
-        void fetchProfile(s.user.id).finally(() => setIsLoading(false));
+        void fetchProfile(s.user).finally(() => setIsLoading(false));
       } else {
         setIsLoading(false);
       }
@@ -63,11 +88,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, s) => {
-        console.log('[Auth] Auth state changed:', _event, s?.user?.email);
+        log('[Auth] Auth state changed:', _event);
         setSession(s);
         setUser(s?.user ?? null);
         if (s?.user) {
-          void fetchProfile(s.user.id);
+          void fetchProfile(s.user);
         } else {
           setProfile(null);
           setIsAdmin(false);
@@ -79,13 +104,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, [fetchProfile]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    console.log('[Auth] Signing in:', email);
+    log('[Auth] Signing in');
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   }, []);
 
   const signOut = useCallback(async () => {
-    console.log('[Auth] Signing out');
+    log('[Auth] Signing out');
     await supabase.auth.signOut();
     setSession(null);
     setUser(null);
