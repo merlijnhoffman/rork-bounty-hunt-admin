@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.rork.0wwcm7r4ksjc50h4tkpvl",
+      "bundleIdentifier": "app.rork.bounty-hunt-admin",
       "buildNumber": "1",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to attach images and videos to clues.",
