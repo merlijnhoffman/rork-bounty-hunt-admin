@@ -13,7 +13,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Users, Link, Mail } from 'lucide-react-native';
 import MapView, { Circle } from 'react-native-maps';
 import { supabase } from '@/lib/supabase';
-import { Event, Ticket, Profile } from '@/types';
+import { Event, Ticket, Profile, EventZone } from '@/types';
 import Colors from '@/constants/colors';
 
 interface PlayerItem {
@@ -36,6 +36,20 @@ export default function LivePlayersScreen() {
         .single();
       if (error) throw error;
       return data as Event;
+    },
+    enabled: !!id,
+  });
+
+  const zoneQuery = useQuery({
+    queryKey: ['eventZone', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('event_zones')
+        .select('*')
+        .eq('event_id', id)
+        .maybeSingle();
+      if (error) throw error;
+      return data as EventZone | null;
     },
     enabled: !!id,
   });
@@ -99,7 +113,6 @@ export default function LivePlayersScreen() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tickets', filter: `event_id=eq.${id}` },
         () => {
-          if (__DEV__) console.log('[LivePlayers] Ticket change detected, refetching');
           void queryClient.invalidateQueries({ queryKey: ['tickets', id] });
         }
       )
@@ -107,8 +120,14 @@ export default function LivePlayersScreen() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'player_connections', filter: `event_id=eq.${id}` },
         () => {
-          if (__DEV__) console.log('[LivePlayers] Connection change detected');
           void queryClient.invalidateQueries({ queryKey: ['connections', id] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'event_zones', filter: `event_id=eq.${id}` },
+        () => {
+          void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
         }
       )
       .subscribe();
@@ -120,14 +139,16 @@ export default function LivePlayersScreen() {
   }, [id, queryClient]);
 
   const event = eventQuery.data;
+  const zone = zoneQuery.data;
   const players = ticketsQuery.data ?? [];
   const connectionCount = connectionsQuery.data ?? 0;
 
-  const isRefreshing = ticketsQuery.isRefetching;
+  const isRefreshing = ticketsQuery.isRefetching || zoneQuery.isRefetching;
   const handleRefresh = useCallback(() => {
     void ticketsQuery.refetch();
     void connectionsQuery.refetch();
-  }, [ticketsQuery, connectionsQuery]);
+    void zoneQuery.refetch();
+  }, [ticketsQuery, connectionsQuery, zoneQuery]);
 
   const renderPlayer = useCallback(({ item }: { item: PlayerItem }) => (
     <View style={styles.playerRow}>
@@ -183,35 +204,50 @@ export default function LivePlayersScreen() {
                   </View>
                 </View>
 
-                {event && event.zone_latitude && event.zone_longitude && (
+                {zone && (
                   <View style={styles.mapContainer}>
                     {Platform.OS === 'web' ? (
                       <View style={styles.mapPlaceholder}>
                         <Text style={styles.mapPlaceholderText}>
-                          Map: {event.zone_latitude.toFixed(4)}, {event.zone_longitude.toFixed(4)}
+                          Zone: {zone.center_latitude.toFixed(4)}, {zone.center_longitude.toFixed(4)}
                         </Text>
-                        <Text style={styles.mapPlaceholderSub}>Radius: {event.zone_radius}m</Text>
+                        <Text style={styles.mapPlaceholderSub}>
+                          Radius: {zone.initial_radius}m
+                          {zone.narrowed_percent > 0 ? ` · Narrowed: ${zone.narrowed_percent}%` : ''}
+                        </Text>
                       </View>
                     ) : (
                       <MapView
                         style={styles.map}
                         initialRegion={{
-                          latitude: event.zone_latitude,
-                          longitude: event.zone_longitude,
-                          latitudeDelta: ((event.zone_radius ?? 500) / 111320) * 4,
-                          longitudeDelta: ((event.zone_radius ?? 500) / 111320) * 4,
+                          latitude: zone.center_latitude,
+                          longitude: zone.center_longitude,
+                          latitudeDelta: (zone.initial_radius / 111320) * 4,
+                          longitudeDelta: (zone.initial_radius / 111320) * 4,
                         }}
                       >
                         <Circle
                           center={{
-                            latitude: event.zone_latitude,
-                            longitude: event.zone_longitude,
+                            latitude: zone.center_latitude,
+                            longitude: zone.center_longitude,
                           }}
-                          radius={event.zone_radius ?? 500}
-                          strokeColor="rgba(0, 212, 255, 0.8)"
-                          fillColor="rgba(0, 212, 255, 0.15)"
-                          strokeWidth={2}
+                          radius={zone.initial_radius}
+                          strokeColor="rgba(0, 212, 255, 0.3)"
+                          fillColor="rgba(0, 212, 255, 0.08)"
+                          strokeWidth={1}
                         />
+                        {zone.narrowed_percent > 0 && (
+                          <Circle
+                            center={{
+                              latitude: zone.center_latitude,
+                              longitude: zone.center_longitude,
+                            }}
+                            radius={zone.initial_radius * (1 - zone.narrowed_percent / 100)}
+                            strokeColor="rgba(0, 212, 255, 0.9)"
+                            fillColor="rgba(0, 212, 255, 0.15)"
+                            strokeWidth={2}
+                          />
+                        )}
                       </MapView>
                     )}
                   </View>

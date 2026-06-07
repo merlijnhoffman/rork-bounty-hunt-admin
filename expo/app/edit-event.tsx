@@ -27,9 +27,6 @@ export default function EditEventScreen() {
   const [startTime, setStartTime] = useState<string>('');
   const [price, setPrice] = useState<string>('');
   const [prizeAmount, setPrizeAmount] = useState<string>('');
-  const [zoneLat, setZoneLat] = useState<string>('');
-  const [zoneLng, setZoneLng] = useState<string>('');
-  const [zoneRadius, setZoneRadius] = useState<string>('');
 
   const eventQuery = useQuery({
     queryKey: ['event', id],
@@ -53,9 +50,6 @@ export default function EditEventScreen() {
       setStartTime(e.start_time);
       setPrice(String(e.price));
       setPrizeAmount(String(e.prize_amount));
-      setZoneLat(e.zone_latitude != null ? String(e.zone_latitude) : '');
-      setZoneLng(e.zone_longitude != null ? String(e.zone_longitude) : '');
-      setZoneRadius(e.zone_radius != null ? String(e.zone_radius) : '');
     }
   }, [eventQuery.data]);
 
@@ -69,9 +63,6 @@ export default function EditEventScreen() {
         prize_amount: parseFloat(prizeAmount),
       };
       if (__DEV__) console.log('[EditEvent] Updating event:', id, 'with data:', JSON.stringify(updateData));
-      if (zoneLat) updateData.zone_latitude = parseFloat(zoneLat);
-      if (zoneLng) updateData.zone_longitude = parseFloat(zoneLng);
-      if (zoneRadius) updateData.zone_radius = parseFloat(zoneRadius);
 
       const { error: updateError } = await supabase
         .from('events')
@@ -149,17 +140,6 @@ export default function EditEventScreen() {
             </View>
           </View>
 
-          <Text style={styles.sectionLabel}>ZONE COORDINATES</Text>
-          <View style={styles.row}>
-            <View style={styles.halfField}>
-              <EditField label="LATITUDE" value={zoneLat} onChangeText={setZoneLat} keyboardType="decimal-pad" />
-            </View>
-            <View style={styles.halfField}>
-              <EditField label="LONGITUDE" value={zoneLng} onChangeText={setZoneLng} keyboardType="decimal-pad" />
-            </View>
-          </View>
-          <EditField label="RADIUS (METERS)" value={zoneRadius} onChangeText={setZoneRadius} keyboardType="decimal-pad" />
-
           <TouchableOpacity
             style={[styles.saveButton, !isValid && styles.buttonDisabled]}
             onPress={() => updateMutation.mutate()}
@@ -223,13 +203,6 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 40,
     gap: 16,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    color: Colors.cyan,
-    letterSpacing: 1.5,
-    fontWeight: '600' as const,
-    marginTop: 8,
   },
   row: {
     flexDirection: 'row',

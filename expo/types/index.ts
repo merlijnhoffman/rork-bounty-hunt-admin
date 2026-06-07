@@ -8,10 +8,18 @@ export interface Event {
   is_active: boolean;
   status: 'scheduled' | 'live' | 'completed';
   created_at: string;
-  zone_latitude?: number | null;
-  zone_longitude?: number | null;
-  zone_radius?: number | null;
   ticket_count?: number;
+}
+
+export interface EventZone {
+  event_id: string;
+  center_latitude: number;
+  center_longitude: number;
+  initial_radius: number;
+  narrowed_percent: number;
+  zone_name: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Clue {
@@ -24,14 +32,6 @@ export interface Clue {
   media_type?: 'image' | 'video' | 'audio' | null;
   release_time: string;
   created_at: string;
-  zone_latitude?: number | null;
-  zone_longitude?: number | null;
-  zone_radius?: number | null;
-  zone_name?: string | null;
-  zone_reveal_percent?: number | null;
-  zone_visible_percent?: number | null;
-  zone_percent?: number | null;
-  reveal_percent?: number | null;
 }
 
 export interface Ticket {

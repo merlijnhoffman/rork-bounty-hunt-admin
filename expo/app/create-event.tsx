@@ -25,9 +25,6 @@ export default function CreateEventScreen() {
   const [startTime, setStartTime] = useState<string>('');
   const [price, setPrice] = useState<string>('');
   const [prizeAmount, setPrizeAmount] = useState<string>('');
-  const [zoneLat, setZoneLat] = useState<string>('');
-  const [zoneLng, setZoneLng] = useState<string>('');
-  const [zoneRadius, setZoneRadius] = useState<string>('');
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -41,9 +38,6 @@ export default function CreateEventScreen() {
         is_active: true,
         status: 'scheduled',
       };
-      if (zoneLat) insertData.zone_latitude = parseFloat(zoneLat);
-      if (zoneLng) insertData.zone_longitude = parseFloat(zoneLng);
-      if (zoneRadius) insertData.zone_radius = parseFloat(zoneRadius);
 
       const { error } = await supabase.from('events').insert(insertData);
       if (error) throw error;
@@ -88,17 +82,6 @@ export default function CreateEventScreen() {
               <InputField label="PRIZE (EUR)" value={prizeAmount} onChangeText={setPrizeAmount} placeholder="500" keyboardType="decimal-pad" />
             </View>
           </View>
-
-          <Text style={styles.sectionLabel}>ZONE COORDINATES</Text>
-          <View style={styles.row}>
-            <View style={styles.halfField}>
-              <InputField label="LATITUDE" value={zoneLat} onChangeText={setZoneLat} placeholder="52.3676" keyboardType="decimal-pad" />
-            </View>
-            <View style={styles.halfField}>
-              <InputField label="LONGITUDE" value={zoneLng} onChangeText={setZoneLng} placeholder="4.9041" keyboardType="decimal-pad" />
-            </View>
-          </View>
-          <InputField label="RADIUS (METERS)" value={zoneRadius} onChangeText={setZoneRadius} placeholder="500" keyboardType="decimal-pad" />
 
           <TouchableOpacity
             style={[styles.createButton, !isValid && styles.buttonDisabled]}
@@ -157,13 +140,6 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 40,
     gap: 16,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    color: Colors.cyan,
-    letterSpacing: 1.5,
-    fontWeight: '600' as const,
-    marginTop: 8,
   },
   row: {
     flexDirection: 'row',

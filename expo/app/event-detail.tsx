@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,9 +37,10 @@ import {
   Minus,
   Plus,
   Crosshair,
+  CheckCircle,
 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
-import { Event, Clue } from '@/types';
+import { Event, Clue, EventZone } from '@/types';
 import Colors from '@/constants/colors';
 
 type MediaType = 'image' | 'video' | 'audio';
@@ -50,6 +51,11 @@ interface MediaAttachment {
   fileName: string;
   mimeType: string;
 }
+
+const ZONE_DEBOUNCE_MS = 300;
+const ZONE_RADIUS_MIN = 50;
+const ZONE_RADIUS_MAX = 10000;
+const ZONE_RADIUS_DEFAULT = 1000;
 
 function StatusBadge({ status }: { status: string }) {
   const color =
@@ -157,19 +163,23 @@ export default function EventDetailScreen() {
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
 
+  // --- Clue form state ---
   const [clueText, setClueText] = useState<string>('');
   const [clueHint, setClueHint] = useState<string>('');
   const [mediaAttachment, setMediaAttachment] = useState<MediaAttachment | null>(null);
 
+  // --- Zone Control state ---
+  const [zoneLat, setZoneLat] = useState<string>('');
+  const [zoneLng, setZoneLng] = useState<string>('');
+  const [zoneRadius, setZoneRadius] = useState<string>(String(ZONE_RADIUS_DEFAULT));
+  const [zoneName, setZoneName] = useState<string>('');
+  const [zoneNarrowedPercent, setZoneNarrowedPercent] = useState<string>('0');
+  const [zoneMapVisible, setZoneMapVisible] = useState<boolean>(false);
+  const [zoneSyncStatus, setZoneSyncStatus] = useState<'idle' | 'saving' | 'synced'>('idle');
 
-  const [clueZoneLat, setClueZoneLat] = useState<string>('');
-  const [clueZoneLng, setClueZoneLng] = useState<string>('');
-  const [clueZoneRadius, setClueZoneRadius] = useState<string>('500');
-  const [clueZoneName, setClueZoneName] = useState<string>('');
-  const [clueZoneRevealPercent, setClueZoneRevealPercent] = useState<string>('100');
-  const [clueZoneEnabled, setClueZoneEnabled] = useState<boolean>(false);
-  const [clueZoneMapVisible, setClueZoneMapVisible] = useState<boolean>(false);
+  const zoneSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // --- Queries ---
   const eventQuery = useQuery({
     queryKey: ['event', id],
     queryFn: async () => {
@@ -209,17 +219,43 @@ export default function EventDetailScreen() {
     enabled: !!id,
   });
 
+  const zoneQuery = useQuery({
+    queryKey: ['eventZone', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('event_zones')
+        .select('*')
+        .eq('event_id', id)
+        .maybeSingle();
+      if (error) throw error;
+      return data as EventZone | null;
+    },
+    enabled: !!id,
+  });
+
+  // Sync zone query data into local state when it loads
+  useEffect(() => {
+    const zone = zoneQuery.data;
+    if (zone) {
+      setZoneLat(String(zone.center_latitude));
+      setZoneLng(String(zone.center_longitude));
+      setZoneRadius(String(zone.initial_radius));
+      setZoneName(zone.zone_name ?? '');
+      setZoneNarrowedPercent(String(zone.narrowed_percent));
+    }
+  }, [zoneQuery.data]);
+
+  // --- Realtime subscription ---
   useEffect(() => {
     if (!id) return;
 
-    if (__DEV__) console.log('[EventDetail] Setting up real-time subscription for clues and event');
+    if (__DEV__) console.log('[EventDetail] Setting up real-time subscriptions');
     const channel = supabase
       .channel(`admin-event-${id}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'clues', filter: `event_id=eq.${id}` },
         () => {
-          if (__DEV__) console.log('[EventDetail] Clue change detected, refetching');
           void queryClient.invalidateQueries({ queryKey: ['clues', id] });
         }
       )
@@ -227,8 +263,15 @@ export default function EventDetailScreen() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'events', filter: `id=eq.${id}` },
         () => {
-          if (__DEV__) console.log('[EventDetail] Event change detected, refetching');
           void queryClient.invalidateQueries({ queryKey: ['event', id] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'event_zones', filter: `event_id=eq.${id}` },
+        () => {
+          if (__DEV__) console.log('[EventDetail] event_zones change detected');
+          void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
         }
       )
       .subscribe();
@@ -239,6 +282,7 @@ export default function EventDetailScreen() {
     };
   }, [id, queryClient]);
 
+  // --- Status mutation ---
   const statusMutation = useMutation({
     mutationFn: async (newStatus: 'live' | 'completed') => {
       if (__DEV__) console.log('[EventDetail] Changing status to:', newStatus, 'for event:', id);
@@ -286,6 +330,7 @@ export default function EventDetailScreen() {
     },
   });
 
+  // --- Media pickers ---
   const pickImage = useCallback(async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -307,7 +352,6 @@ export default function EventDetailScreen() {
           fileName,
           mimeType: asset.mimeType ?? 'image/jpeg',
         });
-        if (__DEV__) console.log('[Media] Image selected:', fileName);
       }
     } catch (err) {
       if (__DEV__) console.error('[Media] Image pick error:', err);
@@ -337,7 +381,6 @@ export default function EventDetailScreen() {
           fileName,
           mimeType: asset.mimeType ?? 'video/mp4',
         });
-        if (__DEV__) console.log('[Media] Video selected:', fileName);
       }
     } catch (err) {
       if (__DEV__) console.error('[Media] Video pick error:', err);
@@ -359,7 +402,6 @@ export default function EventDetailScreen() {
           fileName: asset.name,
           mimeType: asset.mimeType ?? 'audio/mpeg',
         });
-        if (__DEV__) console.log('[Media] Audio selected:', asset.name);
       }
     } catch (err) {
       if (__DEV__) console.error('[Media] Audio pick error:', err);
@@ -367,12 +409,10 @@ export default function EventDetailScreen() {
     }
   }, []);
 
+  // --- Send clue mutation ---
   const sendClueMutation = useMutation({
     mutationFn: async () => {
       if (__DEV__) console.log('[EventDetail] Sending clue for event:', id);
-
-      const session = await supabase.auth.getSession();
-      const accessToken = session.data.session?.access_token;
 
       const { count, error: countError } = await supabase
         .from('clues')
@@ -383,13 +423,11 @@ export default function EventDetailScreen() {
         if (__DEV__) console.warn('[EventDetail] Could not count clues, using fallback:', countError.message);
       }
       const nextOrder = (count ?? (cluesQuery.data ?? []).length) + 1;
-      if (__DEV__) console.log('[EventDetail] Next clue order:', nextOrder);
 
       let mediaUrl: string | null = null;
       let mediaType: MediaType | null = null;
 
       if (mediaAttachment) {
-        if (__DEV__) console.log('[EventDetail] Uploading media attachment...');
         mediaUrl = await uploadMediaToSupabase(mediaAttachment, id ?? 'unknown');
         mediaType = mediaAttachment.type;
       }
@@ -410,23 +448,6 @@ export default function EventDetailScreen() {
       if (clueHint.trim()) {
         cluePayload.hint = clueHint.trim();
       }
-
-      if (clueZoneEnabled && clueZoneLat && clueZoneLng) {
-        cluePayload.zone_latitude = parseFloat(clueZoneLat);
-        cluePayload.zone_longitude = parseFloat(clueZoneLng);
-        cluePayload.zone_radius = parseFloat(clueZoneRadius) || 500;
-        if (clueZoneName.trim()) {
-          cluePayload.zone_name = clueZoneName.trim();
-        }
-        const percentNum = Math.max(0, Math.min(100, parseFloat(clueZoneRevealPercent) || 100));
-        cluePayload.zone_reveal_percent = percentNum;
-        cluePayload.zone_visible_percent = percentNum;
-        cluePayload.zone_percent = percentNum;
-        cluePayload.reveal_percent = percentNum;
-        if (__DEV__) console.log('[EventDetail] Clue zone data:', { lat: cluePayload.zone_latitude, lng: cluePayload.zone_longitude, radius: cluePayload.zone_radius, name: cluePayload.zone_name, percent: percentNum });
-      }
-
-      if (__DEV__) console.log('[EventDetail] Clue payload:', JSON.stringify(cluePayload));
 
       const tryInsert = async (payload: Record<string, unknown>) => {
         const { data, error } = await supabase.from('clues').insert(payload).select();
@@ -453,32 +474,8 @@ export default function EventDetailScreen() {
 
       if (error && /'hint'/i.test(error.message)) {
         if (__DEV__) console.warn('[EventDetail] hint column missing, retrying without it');
-        const { hint: _omit, ...rest } = cluePayload as { hint?: string } & Record<string, unknown>;
         delete (cluePayload as Record<string, unknown>).hint;
-        const retry = await tryInsert(rest);
-        data = retry.data;
-        error = retry.error;
-      }
-
-      const percentColumns = ['zone_reveal_percent', 'zone_visible_percent', 'zone_percent', 'reveal_percent'] as const;
-      for (const col of percentColumns) {
-        if (error && new RegExp(`'${col}'|"${col}"|${col}`, 'i').test(error.message) && /column|schema cache/i.test(error.message)) {
-          if (__DEV__) console.warn(`[EventDetail] ${col} column missing, retrying without it`);
-          delete (cluePayload as Record<string, unknown>)[col];
-          const retry = await tryInsert(cluePayload);
-          data = retry.data;
-          error = retry.error;
-        }
-      }
-
-      if (error && /zone_(latitude|longitude|radius|name)/i.test(error.message)) {
-        if (__DEV__) console.warn('[EventDetail] zone columns missing on clues, retrying without them');
-        const { zone_latitude: _z1, zone_longitude: _z2, zone_radius: _z3, zone_name: _z4, ...rest } = cluePayload as { zone_latitude?: number; zone_longitude?: number; zone_radius?: number; zone_name?: string } & Record<string, unknown>;
-        delete (cluePayload as Record<string, unknown>).zone_latitude;
-        delete (cluePayload as Record<string, unknown>).zone_longitude;
-        delete (cluePayload as Record<string, unknown>).zone_radius;
-        delete (cluePayload as Record<string, unknown>).zone_name;
-        const retry = await tryInsert(rest);
+        const retry = await tryInsert(cluePayload);
         data = retry.data;
         error = retry.error;
       }
@@ -488,6 +485,8 @@ export default function EventDetailScreen() {
 
         const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
         const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+        const session = await supabase.auth.getSession();
+        const accessToken = session.data.session?.access_token;
 
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
@@ -509,7 +508,6 @@ export default function EventDetailScreen() {
         };
 
         let { res, resBody } = await doFetch(cluePayload);
-        if (__DEV__) console.log('[EventDetail] Direct REST clue insert response:', res.status, resBody);
 
         if (!res.ok && /order_number/i.test(resBody)) {
           if (__DEV__) console.warn('[EventDetail] REST insert: order_number missing, retrying without it');
@@ -517,7 +515,6 @@ export default function EventDetailScreen() {
           const retry = await doFetch(rest);
           res = retry.res;
           resBody = retry.resBody;
-          if (__DEV__) console.log('[EventDetail] Retry REST clue insert response:', res.status, resBody);
         }
 
         if (!res.ok && /clue_order/i.test(resBody)) {
@@ -526,7 +523,6 @@ export default function EventDetailScreen() {
           const retry = await doFetch(rest);
           res = retry.res;
           resBody = retry.resBody;
-          if (__DEV__) console.log('[EventDetail] Retry REST clue insert response (clue_order):', res.status, resBody);
         }
 
         if (!res.ok && /'hint'/i.test(resBody)) {
@@ -535,30 +531,6 @@ export default function EventDetailScreen() {
           const retry = await doFetch(cluePayload);
           res = retry.res;
           resBody = retry.resBody;
-          if (__DEV__) console.log('[EventDetail] Retry REST clue insert response (hint):', res.status, resBody);
-        }
-
-        for (const col of ['zone_reveal_percent', 'zone_visible_percent', 'zone_percent', 'reveal_percent']) {
-          if (!res.ok && new RegExp(col, 'i').test(resBody) && /column|schema cache/i.test(resBody)) {
-            if (__DEV__) console.warn(`[EventDetail] REST insert: ${col} missing, retrying without it`);
-            delete (cluePayload as Record<string, unknown>)[col];
-            const retry = await doFetch(cluePayload);
-            res = retry.res;
-            resBody = retry.resBody;
-            if (__DEV__) console.log(`[EventDetail] Retry REST clue insert response (${col}):`, res.status, resBody);
-          }
-        }
-
-        if (!res.ok && /zone_(latitude|longitude|radius|name)/i.test(resBody)) {
-          if (__DEV__) console.warn('[EventDetail] REST insert: zone columns missing, retrying without them');
-          delete (cluePayload as Record<string, unknown>).zone_latitude;
-          delete (cluePayload as Record<string, unknown>).zone_longitude;
-          delete (cluePayload as Record<string, unknown>).zone_radius;
-          delete (cluePayload as Record<string, unknown>).zone_name;
-          const retry = await doFetch(cluePayload);
-          res = retry.res;
-          resBody = retry.resBody;
-          if (__DEV__) console.log('[EventDetail] Retry REST clue insert response (zone):', res.status, resBody);
         }
 
         if (!res.ok) {
@@ -575,13 +547,6 @@ export default function EventDetailScreen() {
       setClueText('');
       setClueHint('');
       setMediaAttachment(null);
-      setClueZoneEnabled(false);
-      setClueZoneLat('');
-      setClueZoneLng('');
-      setClueZoneRadius('500');
-      setClueZoneName('');
-      setClueZoneRevealPercent('100');
-      setClueZoneMapVisible(false);
       void queryClient.invalidateQueries({ queryKey: ['clues', id] });
     },
     onError: (error: Error) => {
@@ -589,6 +554,7 @@ export default function EventDetailScreen() {
     },
   });
 
+  // --- Delete clue mutation ---
   const deleteClueMutation = useMutation({
     mutationFn: async (clueId: string) => {
       if (__DEV__) console.log('[EventDetail] Deleting clue:', clueId);
@@ -606,7 +572,7 @@ export default function EventDetailScreen() {
     },
   });
 
-
+  // --- Reset hunt mutation ---
   const resetMutation = useMutation({
     mutationFn: async () => {
       const session = await supabase.auth.getSession();
@@ -643,6 +609,108 @@ export default function EventDetailScreen() {
     },
   });
 
+  // --- Zone mutations ---
+  const zoneUpsertMutation = useMutation({
+    mutationFn: async () => {
+      const lat = parseFloat(zoneLat);
+      const lng = parseFloat(zoneLng);
+      const radius = parseInt(zoneRadius, 10);
+      if (isNaN(lat) || isNaN(lng) || isNaN(radius)) {
+        throw new Error('Please provide valid latitude, longitude, and radius.');
+      }
+      if (radius < ZONE_RADIUS_MIN || radius > ZONE_RADIUS_MAX) {
+        throw new Error(`Radius must be between ${ZONE_RADIUS_MIN} and ${ZONE_RADIUS_MAX} meters.`);
+      }
+
+      if (__DEV__) console.log('[EventDetail] Upserting zone for event:', id);
+      const { error } = await supabase
+        .from('event_zones')
+        .upsert({
+          event_id: id,
+          center_latitude: lat,
+          center_longitude: lng,
+          initial_radius: radius,
+          narrowed_percent: 0,
+          zone_name: zoneName.trim() || null,
+        }, { onConflict: 'event_id' });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setZoneSyncStatus('synced');
+      void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
+    },
+    onError: (error: Error) => {
+      setZoneSyncStatus('idle');
+      Alert.alert('Error', error.message);
+    },
+  });
+
+  const debouncedZoneUpdate = useCallback((updates: Record<string, unknown>) => {
+    if (zoneSaveTimer.current) {
+      clearTimeout(zoneSaveTimer.current);
+    }
+    setZoneSyncStatus('saving');
+
+    zoneSaveTimer.current = setTimeout(async () => {
+      try {
+        const { error } = await supabase
+          .from('event_zones')
+          .update(updates)
+          .eq('event_id', id);
+
+        if (error) throw error;
+        setZoneSyncStatus('synced');
+        void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (__DEV__) console.error('[EventDetail] Zone update failed:', msg);
+        setZoneSyncStatus('idle');
+      }
+    }, ZONE_DEBOUNCE_MS);
+  }, [id, queryClient]);
+
+  const handleZoneNarrowedChange = useCallback((value: string) => {
+    const cleaned = value.replace(/[^0-9]/g, '');
+    const n = cleaned === '' ? 0 : Math.max(0, Math.min(100, parseInt(cleaned, 10)));
+    const str = cleaned === '' ? '0' : String(n);
+    setZoneNarrowedPercent(str);
+    debouncedZoneUpdate({ narrowed_percent: n });
+  }, [debouncedZoneUpdate]);
+
+  const handleZoneCenterChange = useCallback((lat: number, lng: number) => {
+    setZoneLat(String(lat));
+    setZoneLng(String(lng));
+    debouncedZoneUpdate({ center_latitude: lat, center_longitude: lng });
+  }, [debouncedZoneUpdate]);
+
+  const handleZoneReset = useCallback(() => {
+    Alert.alert('Reset Zone', 'Set the zone reveal back to 100%?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Reset',
+        onPress: () => {
+          setZoneNarrowedPercent('0');
+          setZoneSyncStatus('saving');
+          void (async () => {
+            const { error } = await supabase
+              .from('event_zones')
+              .update({ narrowed_percent: 0 })
+              .eq('event_id', id);
+            if (error) {
+              if (__DEV__) console.error('[EventDetail] Zone reset failed:', error.message);
+              setZoneSyncStatus('idle');
+              return;
+            }
+            setZoneSyncStatus('synced');
+            void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
+          })();
+        },
+      },
+    ]);
+  }, [id, queryClient]);
+
+  // --- Handlers ---
   const handleStartHunt = useCallback(() => {
     Alert.alert('Start Hunt', 'Are you sure you want to start this hunt?', [
       { text: 'Cancel', style: 'cancel' },
@@ -671,16 +739,29 @@ export default function EventDetailScreen() {
     ]);
   }, [deleteClueMutation]);
 
-
-  const canSendClue = clueText.trim().length > 0 || mediaAttachment !== null || (clueZoneEnabled && clueZoneLat && clueZoneLng);
+  const canSendClue = clueText.trim().length > 0 || mediaAttachment !== null;
 
   const event = eventQuery.data;
+  const zone = zoneQuery.data;
+  const hasZone = zone !== null && zone !== undefined;
 
-  const isRefreshing = eventQuery.isRefetching || cluesQuery.isRefetching;
+  const isRefreshing = eventQuery.isRefetching || cluesQuery.isRefetching || zoneQuery.isRefetching;
   const handleRefresh = useCallback(() => {
     void eventQuery.refetch();
     void cluesQuery.refetch();
-  }, [eventQuery, cluesQuery]);
+    void zoneQuery.refetch();
+  }, [eventQuery, cluesQuery, zoneQuery]);
+
+  // --- Computed zone values ---
+  const currentRadius = hasZone
+    ? Math.round((zone?.initial_radius ?? parseFloat(zoneRadius)) * (1 - (zone?.narrowed_percent ?? parseFloat(zoneNarrowedPercent)) / 100))
+    : null;
+
+  const mapCenterLat = hasZone ? (zone?.center_latitude ?? parseFloat(zoneLat) || 53.3498) : parseFloat(zoneLat) || 53.3498;
+  const mapCenterLng = hasZone ? (zone?.center_longitude ?? parseFloat(zoneLng) || -6.2603) : parseFloat(zoneLng) || -6.2603;
+  const mapRadius = hasZone
+    ? (currentRadius ?? zone?.initial_radius ?? parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT)
+    : parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT;
 
   if (eventQuery.isLoading) {
     return (
@@ -745,6 +826,7 @@ export default function EventDetailScreen() {
           <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={Colors.cyan} />
         }
       >
+        {/* Event Info Card */}
         <View style={detailStyles.infoCard}>
           <View style={detailStyles.infoRow}>
             <Text style={detailStyles.infoLabel}>City</Text>
@@ -768,6 +850,7 @@ export default function EventDetailScreen() {
           </View>
         </View>
 
+        {/* Status Control */}
         <Text style={detailStyles.sectionTitle}>STATUS CONTROL</Text>
         <View style={detailStyles.statusButtons}>
           {event.status === 'scheduled' && (
@@ -831,6 +914,371 @@ export default function EventDetailScreen() {
           )}
         </View>
 
+        {/* Zone Control */}
+        <Text style={detailStyles.sectionTitle}>ZONE CONTROL</Text>
+        <View style={detailStyles.zoneControlCard}>
+          {zoneQuery.isLoading ? (
+            <ActivityIndicator color={Colors.cyan} style={{ paddingVertical: 20 }} />
+          ) : !hasZone ? (
+            /* --- Initial Zone Setup --- */
+            <View style={detailStyles.zoneForm}>
+              <Text style={detailStyles.zoneSetupHint}>
+                Configure the hunt zone for this event. Players will see their position relative to this zone.
+              </Text>
+
+              <TextInput
+                style={detailStyles.input}
+                value={zoneName}
+                onChangeText={setZoneName}
+                placeholder="Zone name (optional, e.g. 'Downtown area')"
+                placeholderTextColor={Colors.textMuted}
+              />
+
+              {Platform.OS !== 'web' ? (
+                <>
+                  <TouchableOpacity
+                    style={detailStyles.zoneMapToggle}
+                    onPress={() => setZoneMapVisible(!zoneMapVisible)}
+                    activeOpacity={0.7}
+                  >
+                    <Crosshair size={14} color={Colors.cyan} />
+                    <Text style={detailStyles.zoneMapToggleText}>
+                      {zoneMapVisible ? 'Hide Map' : 'Pick Zone Center'}
+                    </Text>
+                  </TouchableOpacity>
+                  {zoneMapVisible && (
+                    <View style={detailStyles.zoneMapContainer}>
+                      <MapView
+                        style={detailStyles.zoneMap}
+                        initialRegion={{
+                          latitude: parseFloat(zoneLat) || 53.3498,
+                          longitude: parseFloat(zoneLng) || -6.2603,
+                          latitudeDelta: ((parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT) / 111320) * 4,
+                          longitudeDelta: ((parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT) / 111320) * 4,
+                        }}
+                        onPress={(e: MapPressEvent) => {
+                          const { latitude, longitude } = e.nativeEvent.coordinate;
+                          setZoneLat(String(latitude));
+                          setZoneLng(String(longitude));
+                        }}
+                      >
+                        {zoneLat && zoneLng && parseFloat(zoneLat) !== 0 && (
+                          <>
+                            <Marker
+                              coordinate={{
+                                latitude: parseFloat(zoneLat),
+                                longitude: parseFloat(zoneLng),
+                              }}
+                            />
+                            <Circle
+                              center={{
+                                latitude: parseFloat(zoneLat),
+                                longitude: parseFloat(zoneLng),
+                              }}
+                              radius={parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT}
+                              strokeColor="rgba(0, 212, 255, 0.8)"
+                              fillColor="rgba(0, 212, 255, 0.12)"
+                              strokeWidth={2}
+                            />
+                          </>
+                        )}
+                      </MapView>
+                      <View style={detailStyles.mapOverlayHint}>
+                        <Crosshair size={12} color={Colors.cyan} />
+                        <Text style={detailStyles.mapOverlayHintText}>Tap map to set zone center</Text>
+                      </View>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <View style={detailStyles.webCoordsRow}>
+                  <View style={detailStyles.webCoordField}>
+                    <Text style={detailStyles.zoneLabel}>LATITUDE</Text>
+                    <TextInput
+                      style={detailStyles.input}
+                      value={zoneLat}
+                      onChangeText={setZoneLat}
+                      placeholder="e.g. 53.3498"
+                      placeholderTextColor={Colors.textMuted}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={detailStyles.webCoordField}>
+                    <Text style={detailStyles.zoneLabel}>LONGITUDE</Text>
+                    <TextInput
+                      style={detailStyles.input}
+                      value={zoneLng}
+                      onChangeText={setZoneLng}
+                      placeholder="e.g. -6.2603"
+                      placeholderTextColor={Colors.textMuted}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                </View>
+              )}
+
+              <View style={detailStyles.radiusControl}>
+                <Text style={detailStyles.zoneLabel}>ZONE RADIUS</Text>
+                <View style={detailStyles.radiusRow}>
+                  <TouchableOpacity
+                    style={detailStyles.radiusBtn}
+                    onPress={() => {
+                      const current = parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT;
+                      const step = current > 1000 ? 500 : current > 200 ? 100 : 50;
+                      setZoneRadius(String(Math.max(ZONE_RADIUS_MIN, current - step)));
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Minus size={16} color={Colors.cyan} />
+                  </TouchableOpacity>
+                  <View style={detailStyles.radiusValueContainer}>
+                    <Text style={detailStyles.radiusValue}>{parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT}</Text>
+                    <Text style={detailStyles.radiusUnit}>meters</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={detailStyles.radiusBtn}
+                    onPress={() => {
+                      const current = parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT;
+                      const step = current >= 1000 ? 500 : current >= 200 ? 100 : 50;
+                      setZoneRadius(String(Math.min(ZONE_RADIUS_MAX, current + step)));
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Plus size={16} color={Colors.cyan} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[detailStyles.zoneSaveBtn, !zoneLat || !zoneLng ? detailStyles.buttonDisabled : undefined]}
+                onPress={() => zoneUpsertMutation.mutate()}
+                disabled={zoneUpsertMutation.isPending || !zoneLat || !zoneLng}
+                activeOpacity={0.7}
+              >
+                {zoneUpsertMutation.isPending ? (
+                  <ActivityIndicator color={Colors.bg} size="small" />
+                ) : (
+                  <>
+                    <MapPin size={16} color={Colors.bg} />
+                    <Text style={detailStyles.zoneSaveBtnText}>SAVE ZONE</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : (
+            /* --- Live Zone Control --- */
+            <View style={detailStyles.zoneForm}>
+              {/* Zone info header */}
+              <View style={detailStyles.zoneLiveHeader}>
+                <View style={detailStyles.zoneLiveInfo}>
+                  {zone?.zone_name ? (
+                    <Text style={detailStyles.zoneLiveName}>{zone.zone_name}</Text>
+                  ) : null}
+                  <View style={detailStyles.zoneLiveCoords}>
+                    <Text style={detailStyles.zoneLiveCoordText}>
+                      {zone?.center_latitude.toFixed(6)}, {zone?.center_longitude.toFixed(6)}
+                    </Text>
+                  </View>
+                </View>
+                <View style={detailStyles.zoneSyncBadge}>
+                  {zoneSyncStatus === 'saving' ? (
+                    <ActivityIndicator size="small" color={Colors.amber} />
+                  ) : zoneSyncStatus === 'synced' ? (
+                    <CheckCircle size={14} color={Colors.cyan} />
+                  ) : null}
+                  <Text style={[
+                    detailStyles.zoneSyncText,
+                    zoneSyncStatus === 'synced' && { color: Colors.cyan },
+                    zoneSyncStatus === 'saving' && { color: Colors.amber },
+                  ]}>
+                    {zoneSyncStatus === 'saving' ? 'Saving…' : zoneSyncStatus === 'synced' ? 'Synced' : ''}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Map with draggable marker */}
+              {Platform.OS !== 'web' ? (
+                <>
+                  <TouchableOpacity
+                    style={detailStyles.zoneMapToggle}
+                    onPress={() => setZoneMapVisible(!zoneMapVisible)}
+                    activeOpacity={0.7}
+                  >
+                    <MapPin size={14} color={Colors.cyan} />
+                    <Text style={detailStyles.zoneMapToggleText}>
+                      {zoneMapVisible ? 'Hide Map' : 'Show Map'}
+                    </Text>
+                  </TouchableOpacity>
+                  {zoneMapVisible && (
+                    <View style={detailStyles.zoneMapContainer}>
+                      <MapView
+                        style={detailStyles.zoneMap}
+                        initialRegion={{
+                          latitude: zone?.center_latitude ?? 53.3498,
+                          longitude: zone?.center_longitude ?? -6.2603,
+                          latitudeDelta: ((zone?.initial_radius ?? ZONE_RADIUS_DEFAULT) / 111320) * 4,
+                          longitudeDelta: ((zone?.initial_radius ?? ZONE_RADIUS_DEFAULT) / 111320) * 4,
+                        }}
+                      >
+                        <Marker
+                          coordinate={{
+                            latitude: zone?.center_latitude ?? 0,
+                            longitude: zone?.center_longitude ?? 0,
+                          }}
+                          draggable
+                          onDragEnd={(e) => {
+                            const { latitude, longitude } = e.nativeEvent.coordinate;
+                            handleZoneCenterChange(latitude, longitude);
+                          }}
+                        />
+                        <Circle
+                          center={{
+                            latitude: zone?.center_latitude ?? 0,
+                            longitude: zone?.center_longitude ?? 0,
+                          }}
+                          radius={zone?.initial_radius ?? ZONE_RADIUS_DEFAULT}
+                          strokeColor="rgba(0, 212, 255, 0.3)"
+                          fillColor="rgba(0, 212, 255, 0.05)"
+                          strokeWidth={1}
+                        />
+                        {currentRadius != null && currentRadius > 0 && (
+                          <Circle
+                            center={{
+                              latitude: zone?.center_latitude ?? 0,
+                              longitude: zone?.center_longitude ?? 0,
+                            }}
+                            radius={currentRadius}
+                            strokeColor="rgba(0, 212, 255, 0.9)"
+                            fillColor="rgba(0, 212, 255, 0.15)"
+                            strokeWidth={2}
+                          />
+                        )}
+                      </MapView>
+                      <View style={detailStyles.mapOverlayHint}>
+                        <Crosshair size={12} color={Colors.cyan} />
+                        <Text style={detailStyles.mapOverlayHintText}>
+                          Drag marker to move zone center
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <View style={detailStyles.webCoordsRow}>
+                  <View style={detailStyles.webCoordField}>
+                    <Text style={detailStyles.zoneLabel}>LATITUDE</Text>
+                    <TextInput
+                      style={detailStyles.input}
+                      value={zoneLat}
+                      onChangeText={(v) => {
+                        setZoneLat(v);
+                        const n = parseFloat(v);
+                        if (!isNaN(n)) handleZoneCenterChange(n, parseFloat(zoneLng) || 0);
+                      }}
+                      placeholder="e.g. 53.3498"
+                      placeholderTextColor={Colors.textMuted}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={detailStyles.webCoordField}>
+                    <Text style={detailStyles.zoneLabel}>LONGITUDE</Text>
+                    <TextInput
+                      style={detailStyles.input}
+                      value={zoneLng}
+                      onChangeText={(v) => {
+                        setZoneLng(v);
+                        const n = parseFloat(v);
+                        if (!isNaN(n)) handleZoneCenterChange(parseFloat(zoneLat) || 0, n);
+                      }}
+                      placeholder="e.g. -6.2603"
+                      placeholderTextColor={Colors.textMuted}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                </View>
+              )}
+
+              {/* Narrowed percent control */}
+              <View style={detailStyles.radiusControl}>
+                <Text style={detailStyles.zoneLabel}>ZONE REVEAL</Text>
+                <View style={detailStyles.radiusRow}>
+                  <TouchableOpacity
+                    style={detailStyles.radiusBtn}
+                    onPress={() => {
+                      const n = Math.max(0, parseInt(zoneNarrowedPercent, 10) - 5);
+                      handleZoneNarrowedChange(String(n));
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Minus size={16} color={Colors.cyan} />
+                  </TouchableOpacity>
+                  <View style={detailStyles.radiusValueContainer}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+                      <TextInput
+                        style={detailStyles.percentInput}
+                        value={zoneNarrowedPercent}
+                        onChangeText={(t) => {
+                          const cleaned = t.replace(/[^0-9]/g, '');
+                          handleZoneNarrowedChange(cleaned);
+                        }}
+                        onBlur={() => {
+                          if (!zoneNarrowedPercent) handleZoneNarrowedChange('0');
+                        }}
+                        keyboardType="number-pad"
+                        maxLength={3}
+                        placeholder="0"
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                      <Text style={detailStyles.radiusUnit}>% narrowed</Text>
+                    </View>
+                    {currentRadius != null && (
+                      <Text style={detailStyles.currentRadiusText}>
+                        Current radius: {currentRadius}m
+                      </Text>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    style={detailStyles.radiusBtn}
+                    onPress={() => {
+                      const n = Math.min(100, parseInt(zoneNarrowedPercent, 10) + 5);
+                      handleZoneNarrowedChange(String(n));
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Plus size={16} color={Colors.cyan} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Zone actions */}
+              <View style={detailStyles.zoneLiveActions}>
+                <TouchableOpacity
+                  style={detailStyles.zoneResetBtn}
+                  onPress={handleZoneReset}
+                  activeOpacity={0.7}
+                  disabled={parseInt(zoneNarrowedPercent, 10) === 0}
+                >
+                  <RotateCcw size={14} color={parseInt(zoneNarrowedPercent, 10) === 0 ? Colors.textMuted : Colors.amber} />
+                  <Text style={[
+                    detailStyles.zoneResetBtnText,
+                    parseInt(zoneNarrowedPercent, 10) === 0 && { color: Colors.textMuted },
+                  ]}>
+                    RESET ZONE
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Updated timestamp */}
+              {zone?.updated_at && (
+                <Text style={detailStyles.zoneUpdatedText}>
+                  Last updated: {new Date(zone.updated_at).toLocaleString()}
+                </Text>
+              )}
+            </View>
+          )}
+        </View>
+
+        {/* Send Clue */}
         <Text style={detailStyles.sectionTitle}>SEND CLUE</Text>
         <View style={detailStyles.clueForm}>
           <TextInput
@@ -889,224 +1337,6 @@ export default function EventDetailScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={detailStyles.zoneToggleSection}>
-            <TouchableOpacity
-              style={[detailStyles.zoneToggleBtn, clueZoneEnabled && detailStyles.zoneToggleBtnActive]}
-              onPress={() => {
-                setClueZoneEnabled(!clueZoneEnabled);
-                if (!clueZoneEnabled && event.zone_latitude && event.zone_longitude) {
-                  setClueZoneLat(String(event.zone_latitude));
-                  setClueZoneLng(String(event.zone_longitude));
-                  setClueZoneRadius(String(event.zone_radius ?? 500));
-                }
-              }}
-              activeOpacity={0.7}
-            >
-              <MapPin size={16} color={clueZoneEnabled ? Colors.bg : Colors.cyan} />
-              <Text style={[detailStyles.zoneToggleLabel, clueZoneEnabled && detailStyles.zoneToggleLabelActive]}>
-                {clueZoneEnabled ? 'Zone Attached' : 'Add Zone'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {clueZoneEnabled && (
-            <View style={detailStyles.clueZoneForm}>
-              <TextInput
-                style={detailStyles.input}
-                value={clueZoneName}
-                onChangeText={setClueZoneName}
-                placeholder="Zone name (optional, e.g. 'Near the park')"
-                placeholderTextColor={Colors.textMuted}
-              />
-
-              {Platform.OS !== 'web' ? (
-                <>
-                  <TouchableOpacity
-                    style={detailStyles.clueZoneMapToggle}
-                    onPress={() => setClueZoneMapVisible(!clueZoneMapVisible)}
-                    activeOpacity={0.7}
-                  >
-                    <Crosshair size={14} color={Colors.cyan} />
-                    <Text style={detailStyles.clueZoneMapToggleText}>
-                      {clueZoneMapVisible ? 'Hide Map' : 'Pick on Map'}
-                    </Text>
-                  </TouchableOpacity>
-                  {clueZoneMapVisible && (
-                    <View style={detailStyles.clueZoneMapContainer}>
-                      <MapView
-                        style={detailStyles.clueZoneMap}
-                        initialRegion={{
-                          latitude: parseFloat(clueZoneLat) || event.zone_latitude || 53.3498,
-                          longitude: parseFloat(clueZoneLng) || event.zone_longitude || -6.2603,
-                          latitudeDelta: ((parseFloat(clueZoneRadius) || 500) / 111320) * 4,
-                          longitudeDelta: ((parseFloat(clueZoneRadius) || 500) / 111320) * 4,
-                        }}
-                        onPress={(e: MapPressEvent) => {
-                          const { latitude, longitude } = e.nativeEvent.coordinate;
-                          setClueZoneLat(String(latitude));
-                          setClueZoneLng(String(longitude));
-                        }}
-                      >
-                        {clueZoneLat && clueZoneLng && parseFloat(clueZoneLat) !== 0 && (
-                          <>
-                            <Marker
-                              coordinate={{
-                                latitude: parseFloat(clueZoneLat),
-                                longitude: parseFloat(clueZoneLng),
-                              }}
-                              draggable
-                              onDragEnd={(e) => {
-                                const { latitude, longitude } = e.nativeEvent.coordinate;
-                                setClueZoneLat(String(latitude));
-                                setClueZoneLng(String(longitude));
-                              }}
-                            />
-                            <Circle
-                              center={{
-                                latitude: parseFloat(clueZoneLat),
-                                longitude: parseFloat(clueZoneLng),
-                              }}
-                              radius={parseFloat(clueZoneRadius) || 500}
-                              strokeColor="rgba(0, 212, 255, 0.8)"
-                              fillColor="rgba(0, 212, 255, 0.12)"
-                              strokeWidth={2}
-                            />
-                          </>
-                        )}
-                      </MapView>
-                      <View style={detailStyles.mapOverlayHint}>
-                        <Crosshair size={12} color={Colors.cyan} />
-                        <Text style={detailStyles.mapOverlayHintText}>Tap to set zone center</Text>
-                      </View>
-                    </View>
-                  )}
-                </>
-              ) : (
-                <View style={detailStyles.webCoordsRow}>
-                  <View style={detailStyles.webCoordField}>
-                    <Text style={detailStyles.zoneLabel}>LATITUDE</Text>
-                    <TextInput
-                      style={detailStyles.input}
-                      value={clueZoneLat}
-                      onChangeText={setClueZoneLat}
-                      placeholder="e.g. 53.3498"
-                      placeholderTextColor={Colors.textMuted}
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
-                  <View style={detailStyles.webCoordField}>
-                    <Text style={detailStyles.zoneLabel}>LONGITUDE</Text>
-                    <TextInput
-                      style={detailStyles.input}
-                      value={clueZoneLng}
-                      onChangeText={setClueZoneLng}
-                      placeholder="e.g. -6.2603"
-                      placeholderTextColor={Colors.textMuted}
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
-                </View>
-              )}
-
-              <View style={detailStyles.radiusControl}>
-                <Text style={detailStyles.zoneLabel}>ZONE RADIUS</Text>
-                <View style={detailStyles.radiusRow}>
-                  <TouchableOpacity
-                    style={detailStyles.radiusBtn}
-                    onPress={() => {
-                      const current = parseFloat(clueZoneRadius) || 500;
-                      const step = current > 1000 ? 500 : current > 200 ? 100 : 50;
-                      setClueZoneRadius(String(Math.max(50, current - step)));
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Minus size={16} color={Colors.cyan} />
-                  </TouchableOpacity>
-                  <View style={detailStyles.radiusValueContainer}>
-                    <Text style={detailStyles.radiusValue}>{parseFloat(clueZoneRadius) || 500}</Text>
-                    <Text style={detailStyles.radiusUnit}>meters</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={detailStyles.radiusBtn}
-                    onPress={() => {
-                      const current = parseFloat(clueZoneRadius) || 500;
-                      const step = current >= 1000 ? 500 : current >= 200 ? 100 : 50;
-                      setClueZoneRadius(String(current + step));
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Plus size={16} color={Colors.cyan} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={detailStyles.radiusControl}>
-                <Text style={detailStyles.zoneLabel}>ZONE REVEAL %</Text>
-                <View style={detailStyles.radiusRow}>
-                  <TouchableOpacity
-                    style={detailStyles.radiusBtn}
-                    onPress={() => {
-                      const current = parseFloat(clueZoneRevealPercent);
-                      const safe = isNaN(current) ? 100 : current;
-                      setClueZoneRevealPercent(String(Math.max(0, safe - 5)));
-                    }}
-                    activeOpacity={0.7}
-                    testID="decrease-percent-button"
-                  >
-                    <Minus size={16} color={Colors.cyan} />
-                  </TouchableOpacity>
-                  <View style={detailStyles.radiusValueContainer}>
-                    <TextInput
-                      style={detailStyles.percentInput}
-                      value={clueZoneRevealPercent}
-                      onChangeText={(t) => {
-                        const cleaned = t.replace(/[^0-9]/g, '');
-                        if (cleaned === '') { setClueZoneRevealPercent(''); return; }
-                        const n = Math.max(0, Math.min(100, parseInt(cleaned, 10)));
-                        setClueZoneRevealPercent(String(n));
-                      }}
-                      onBlur={() => {
-                        if (!clueZoneRevealPercent) setClueZoneRevealPercent('100');
-                      }}
-                      keyboardType="number-pad"
-                      maxLength={3}
-                      placeholder="100"
-                      placeholderTextColor={Colors.textMuted}
-                      testID="percent-input"
-                    />
-                    <Text style={detailStyles.radiusUnit}>% shown</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={detailStyles.radiusBtn}
-                    onPress={() => {
-                      const current = parseFloat(clueZoneRevealPercent);
-                      const safe = isNaN(current) ? 100 : current;
-                      setClueZoneRevealPercent(String(Math.min(100, safe + 5)));
-                    }}
-                    activeOpacity={0.7}
-                    testID="increase-percent-button"
-                  >
-                    <Plus size={16} color={Colors.cyan} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {Platform.OS !== 'web' && clueZoneLat && clueZoneLng && (
-                <View style={detailStyles.coordDisplay}>
-                  <View style={detailStyles.coordItem}>
-                    <Text style={detailStyles.coordLabel}>LAT</Text>
-                    <Text style={detailStyles.coordValue}>{parseFloat(clueZoneLat)?.toFixed(6) || '—'}</Text>
-                  </View>
-                  <View style={detailStyles.coordDivider} />
-                  <View style={detailStyles.coordItem}>
-                    <Text style={detailStyles.coordLabel}>LNG</Text>
-                    <Text style={detailStyles.coordValue}>{parseFloat(clueZoneLng)?.toFixed(6) || '—'}</Text>
-                  </View>
-                </View>
-              )}
-            </View>
-          )}
-
           <TouchableOpacity
             style={[detailStyles.sendButton, !canSendClue && detailStyles.buttonDisabled]}
             onPress={() => sendClueMutation.mutate()}
@@ -1130,6 +1360,7 @@ export default function EventDetailScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Clue History */}
         <Text style={detailStyles.sectionTitle}>CLUE HISTORY</Text>
         {cluesQuery.isLoading ? (
           <ActivityIndicator color={Colors.cyan} style={{ marginVertical: 20 }} />
@@ -1165,19 +1396,6 @@ export default function EventDetailScreen() {
                   <Text style={detailStyles.clueHintText}>Hint: {clue.hint}</Text>
                 ) : null}
                 <ClueMediaDisplay clue={clue} />
-                {(clue.zone_latitude && clue.zone_longitude) ? (
-                  <View style={detailStyles.clueZoneTag}>
-                    <MapPin size={12} color={Colors.cyan} />
-                    <Text style={detailStyles.clueZoneTagText}>
-                      {clue.zone_name ? clue.zone_name : `${clue.zone_latitude?.toFixed(4)}, ${clue.zone_longitude?.toFixed(4)}`}
-                      {clue.zone_radius ? ` · ${clue.zone_radius}m` : ''}
-                      {(() => {
-                        const p = clue.zone_reveal_percent ?? clue.zone_visible_percent ?? clue.zone_percent ?? clue.reveal_percent;
-                        return typeof p === 'number' ? ` · ${p}%` : '';
-                      })()}
-                    </Text>
-                  </View>
-                ) : null}
                 <View style={detailStyles.clueTime}>
                   <Clock size={11} color={Colors.textMuted} />
                   <Text style={detailStyles.clueTimeText}>
@@ -1258,12 +1476,6 @@ const detailStyles = StyleSheet.create({
     color: Colors.cyan,
     letterSpacing: 1.5,
     fontWeight: '700' as const,
-    marginTop: 8,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     marginTop: 8,
   },
   statusButtons: {
@@ -1439,17 +1651,42 @@ const detailStyles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  // --- Zone Control ---
+  zoneControlCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    overflow: 'hidden',
+  },
   zoneForm: {
+    padding: 14,
     gap: 12,
   },
-  mapEditorContainer: {
-    borderRadius: 14,
+  zoneSetupHint: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  zoneMapToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+  },
+  zoneMapToggleText: {
+    color: Colors.cyan,
+    fontSize: 13,
+    fontWeight: '600' as const,
+  },
+  zoneMapContainer: {
+    borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: Colors.cardBorder,
   },
-  mapEditor: {
-    height: 280,
+  zoneMap: {
+    height: 240,
   },
   mapOverlayHint: {
     flexDirection: 'row',
@@ -1464,25 +1701,6 @@ const detailStyles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textSecondary,
     letterSpacing: 0.3,
-  },
-  mapWebFallback: {
-    backgroundColor: Colors.card,
-    borderRadius: 14,
-    padding: 20,
-    alignItems: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-  },
-  mapWebFallbackTitle: {
-    color: Colors.white,
-    fontSize: 15,
-    fontWeight: '600' as const,
-  },
-  mapWebFallbackSub: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginBottom: 12,
   },
   radiusControl: {
     gap: 6,
@@ -1511,19 +1729,12 @@ const detailStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.inputBorder,
     paddingVertical: 10,
+    gap: 4,
   },
   radiusValue: {
     fontSize: 20,
     fontWeight: '700' as const,
     color: Colors.white,
-  },
-  percentInput: {
-    color: Colors.white,
-    fontSize: 22,
-    fontWeight: '700' as const,
-    textAlign: 'center' as const,
-    minWidth: 60,
-    paddingVertical: 0,
   },
   radiusUnit: {
     fontSize: 10,
@@ -1531,38 +1742,18 @@ const detailStyles = StyleSheet.create({
     letterSpacing: 1,
     fontWeight: '600' as const,
   },
-  coordDisplay: {
-    flexDirection: 'row',
-    backgroundColor: Colors.card,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    overflow: 'hidden',
-  },
-  coordItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 10,
-    gap: 2,
-  },
-  coordLabel: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    letterSpacing: 1.5,
-    fontWeight: '700' as const,
-  },
-  coordValue: {
-    fontSize: 13,
+  percentInput: {
     color: Colors.white,
+    fontSize: 22,
+    fontWeight: '700' as const,
+    textAlign: 'center' as const,
+    minWidth: 50,
+    paddingVertical: 0,
+  },
+  currentRadiusText: {
+    fontSize: 12,
+    color: Colors.cyan,
     fontWeight: '600' as const,
-  },
-  coordDivider: {
-    width: 1,
-    backgroundColor: Colors.cardBorder,
-  },
-  zoneRow: {
-    flexDirection: 'row',
-    gap: 12,
   },
   zoneLabel: {
     fontSize: 11,
@@ -1571,64 +1762,88 @@ const detailStyles = StyleSheet.create({
     fontWeight: '600' as const,
     marginBottom: 4,
   },
-  zoneActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  zoneCancelButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: Colors.inputBorder,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  zoneCancelText: {
-    color: Colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '600' as const,
-    letterSpacing: 1,
-  },
-  zoneSaveButton: {
-    flex: 1,
+  zoneSaveBtn: {
     backgroundColor: Colors.cyan,
     borderRadius: 10,
     paddingVertical: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 4,
   },
-  zoneSaveText: {
+  zoneSaveBtnText: {
     color: Colors.bg,
     fontSize: 13,
     fontWeight: '700' as const,
-    letterSpacing: 1,
+    letterSpacing: 1.5,
   },
-  zoneInfo: {
-    backgroundColor: Colors.card,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    overflow: 'hidden',
+  // Live zone control
+  zoneLiveHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  zoneMapPreview: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.cardBorder,
+  zoneLiveInfo: {
+    flex: 1,
+    gap: 2,
   },
-  zoneMapPreviewMap: {
-    height: 160,
+  zoneLiveName: {
+    fontSize: 15,
+    color: Colors.white,
+    fontWeight: '700' as const,
   },
-  zoneInfoDetails: {
-    padding: 14,
+  zoneLiveCoords: {
+    flexDirection: 'row',
     gap: 6,
   },
-  zoneInfoRow: {
+  zoneLiveCoordText: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  zoneSyncBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.bg,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  zoneSyncText: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    fontWeight: '600' as const,
+  },
+  zoneLiveActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  zoneResetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
+    borderWidth: 1,
+    borderColor: Colors.amber,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
   },
-  zoneInfoText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
+  zoneResetBtnText: {
+    color: Colors.amber,
+    fontSize: 12,
+    fontWeight: '700' as const,
+    letterSpacing: 1,
   },
+  zoneUpdatedText: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  // --- Clue History ---
   clueList: {
     gap: 10,
   },
@@ -1699,76 +1914,6 @@ const detailStyles = StyleSheet.create({
   clueTimeText: {
     color: Colors.textMuted,
     fontSize: 11,
-  },
-  zoneToggleSection: {
-    flexDirection: 'row',
-  },
-  zoneToggleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: Colors.cyanDim,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 212, 255, 0.3)',
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-  },
-  zoneToggleBtnActive: {
-    backgroundColor: Colors.cyan,
-    borderColor: Colors.cyan,
-  },
-  zoneToggleLabel: {
-    color: Colors.cyan,
-    fontSize: 12,
-    fontWeight: '600' as const,
-    letterSpacing: 0.5,
-  },
-  zoneToggleLabelActive: {
-    color: Colors.bg,
-  },
-  clueZoneForm: {
-    gap: 10,
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    padding: 12,
-  },
-  clueZoneMapToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 8,
-  },
-  clueZoneMapToggleText: {
-    color: Colors.cyan,
-    fontSize: 13,
-    fontWeight: '600' as const,
-  },
-  clueZoneMapContainer: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-  },
-  clueZoneMap: {
-    height: 220,
-  },
-  clueZoneTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: Colors.cyanDim,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    alignSelf: 'flex-start',
-  },
-  clueZoneTagText: {
-    color: Colors.cyan,
-    fontSize: 11,
-    fontWeight: '600' as const,
   },
   emptyText: {
     color: Colors.textMuted,
