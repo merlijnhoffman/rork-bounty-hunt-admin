@@ -27,6 +27,7 @@ export default function EditEventScreen() {
   const [startTime, setStartTime] = useState<string>('');
   const [price, setPrice] = useState<string>('');
   const [prizeAmount, setPrizeAmount] = useState<string>('');
+  const [isFree, setIsFree] = useState<boolean>(false);
 
   const eventQuery = useQuery({
     queryKey: ['event', id],
@@ -48,8 +49,10 @@ export default function EditEventScreen() {
       setCity(e.city);
       setDate(e.date);
       setStartTime(e.start_time);
-      setPrice(String(e.price));
+      const priceValue = e.price ?? 0;
+      setPrice(String(priceValue));
       setPrizeAmount(String(e.prize_amount));
+      setIsFree(priceValue === 0);
     }
   }, [eventQuery.data]);
 
@@ -59,7 +62,7 @@ export default function EditEventScreen() {
         city: city.trim(),
         date: date.trim(),
         start_time: startTime.trim(),
-        price: parseFloat(price),
+        price: isFree ? 0 : parseFloat(price),
         prize_amount: parseFloat(prizeAmount),
       };
       if (__DEV__) console.log('[EditEvent] Updating event:', id, 'with data:', JSON.stringify(updateData));
@@ -110,7 +113,7 @@ export default function EditEventScreen() {
     );
   }
 
-  const isValid = city && date && startTime && price && prizeAmount;
+  const isValid = city && date && startTime && (isFree || price) && prizeAmount;
 
   return (
     <>
@@ -133,12 +136,29 @@ export default function EditEventScreen() {
 
           <View style={styles.row}>
             <View style={styles.halfField}>
-              <EditField label="PRICE (EUR)" value={price} onChangeText={setPrice} keyboardType="decimal-pad" />
+              <EditField
+                label="PRICE (EUR)"
+                value={isFree ? '0' : price}
+                onChangeText={setPrice}
+                keyboardType="decimal-pad"
+                editable={!isFree}
+              />
             </View>
             <View style={styles.halfField}>
               <EditField label="PRIZE (EUR)" value={prizeAmount} onChangeText={setPrizeAmount} keyboardType="decimal-pad" />
             </View>
           </View>
+
+          <TouchableOpacity
+            style={styles.freeToggle}
+            onPress={() => setIsFree((v) => !v)}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.freeIndicator, isFree && styles.freeIndicatorOn]}>
+              {isFree && <Text style={styles.freeCheck}>✓</Text>}
+            </View>
+            <Text style={styles.freeLabel}>FREE EVENT</Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.saveButton, !isValid && styles.buttonDisabled]}
@@ -165,12 +185,14 @@ function EditField({
   onChangeText,
   placeholder,
   keyboardType,
+  editable = true,
 }: {
   label: string;
   value: string;
   onChangeText: (text: string) => void;
   placeholder?: string;
   keyboardType?: 'default' | 'decimal-pad' | 'numeric';
+  editable?: boolean;
 }) {
   return (
     <View style={styles.inputGroup}>
@@ -183,6 +205,7 @@ function EditField({
         placeholderTextColor={Colors.textMuted}
         keyboardType={keyboardType ?? 'default'}
         autoCorrect={false}
+        editable={editable}
       />
     </View>
   );
@@ -229,6 +252,38 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     color: Colors.white,
     fontSize: 16,
+  },
+  freeToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 4,
+  },
+  freeIndicator: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: Colors.inputBorder,
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  freeIndicatorOn: {
+    borderColor: Colors.cyan,
+    backgroundColor: Colors.cyan,
+  },
+  freeCheck: {
+    color: Colors.bg,
+    fontSize: 14,
+    fontWeight: '700' as const,
+    lineHeight: 16,
+  },
+  freeLabel: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    letterSpacing: 1.5,
+    fontWeight: '600' as const,
   },
   saveButton: {
     backgroundColor: Colors.cyan,
