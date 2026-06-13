@@ -583,7 +583,7 @@ export default function EventDetailScreen() {
 
   // --- Reset hunt mutation ---
   const resetMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (startingRadius: number) => {
       const session = await supabase.auth.getSession();
       const accessToken = session.data.session?.access_token;
       const { data, error } = await supabase
@@ -608,10 +608,27 @@ export default function EventDetailScreen() {
         const resBody = await res.text();
         if (!res.ok) throw new Error(`Reset failed (${res.status}): ${resBody}`);
       }
+
+      // Also reset the zone: restore starting radius and reset narrowed_percent
+      const existingZone = zoneQuery.data;
+      const { error: zoneError } = await supabase
+        .from('event_zones')
+        .upsert({
+          event_id: id,
+          center_latitude: existingZone?.center_latitude ?? 53.3498,
+          center_longitude: existingZone?.center_longitude ?? -6.2603,
+          initial_radius: startingRadius,
+          narrowed_percent: 0,
+          zone_name: existingZone?.zone_name ?? null,
+        }, { onConflict: 'event_id' });
+      if (zoneError) {
+        if (__DEV__) console.error('[EventDetail] Zone reset on hunt reset failed:', zoneError.message);
+      }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['event', id] });
       void queryClient.invalidateQueries({ queryKey: ['events'] });
+      void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
     },
     onError: (error: Error) => {
       Alert.alert('Error', error.message);
@@ -735,11 +752,29 @@ export default function EventDetailScreen() {
   }, [statusMutation]);
 
   const handleResetHunt = useCallback(() => {
+    const currentRadius = zoneQuery.data?.initial_radius ?? ZONE_RADIUS_DEFAULT;
     Alert.alert('Reset Hunt', 'Reset this hunt back to scheduled?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Reset', style: 'destructive', onPress: () => resetMutation.mutate() },
+      {
+        text: 'Next',
+        onPress: () => {
+          Alert.alert(
+            'Starting Zone Radius',
+            `Choose the starting radius for the zone.\nCurrent: ${currentRadius}m`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: `Keep (${currentRadius}m)`, onPress: () => resetMutation.mutate(currentRadius) },
+              { text: '200m', onPress: () => resetMutation.mutate(200) },
+              { text: '500m', onPress: () => resetMutation.mutate(500) },
+              { text: '1000m', onPress: () => resetMutation.mutate(1000) },
+              { text: '2000m', onPress: () => resetMutation.mutate(2000) },
+              { text: '5000m', onPress: () => resetMutation.mutate(5000) },
+            ],
+          );
+        },
+      },
     ]);
-  }, [resetMutation]);
+  }, [resetMutation, zoneQuery.data]);
 
   const handleDeleteClue = useCallback((clueId: string) => {
     Alert.alert('Delete Clue', 'Are you sure you want to delete this clue?', [
