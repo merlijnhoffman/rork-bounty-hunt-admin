@@ -173,7 +173,7 @@ export default function EventDetailScreen() {
   const [zoneLng, setZoneLng] = useState<string>('');
   const [zoneRadius, setZoneRadius] = useState<string>(String(ZONE_RADIUS_DEFAULT));
   const [zoneName, setZoneName] = useState<string>('');
-  const [zoneNarrowedPercent, setZoneNarrowedPercent] = useState<string>('0');
+  const [zoneCurrentRadiusMeters, setZoneCurrentRadiusMeters] = useState<string>('');
   const [zoneMapVisible, setZoneMapVisible] = useState<boolean>(false);
   const [zoneSyncStatus, setZoneSyncStatus] = useState<'idle' | 'saving' | 'synced'>('idle');
 
@@ -241,7 +241,8 @@ export default function EventDetailScreen() {
       setZoneLng(String(zone.center_longitude));
       setZoneRadius(String(zone.initial_radius));
       setZoneName(zone.zone_name ?? '');
-      setZoneNarrowedPercent(String(zone.narrowed_percent));
+      const currentRad = Math.round(zone.initial_radius * (1 - zone.narrowed_percent / 100));
+      setZoneCurrentRadiusMeters(String(currentRad));
     }
   }, [zoneQuery.data]);
 
@@ -679,13 +680,15 @@ export default function EventDetailScreen() {
     }, ZONE_DEBOUNCE_MS);
   }, [id, queryClient]);
 
-  const handleZoneNarrowedChange = useCallback((value: string) => {
+  const handleCurrentRadiusChange = useCallback((value: string) => {
     const cleaned = value.replace(/[^0-9]/g, '');
-    const n = Math.max(0, Math.min(100, parseInt(cleaned || '0', 10)));
-    const str = cleaned === '' ? '0' : String(n);
-    setZoneNarrowedPercent(str);
-    debouncedZoneUpdate({ narrowed_percent: n });
-  }, [debouncedZoneUpdate]);
+    const ir = zoneQuery.data?.initial_radius ?? (parseInt(zoneRadius) || ZONE_RADIUS_DEFAULT);
+    const meters = Math.max(0, Math.min(ir, parseInt(cleaned || '0', 10)));
+    const str = cleaned === '' ? '' : String(meters);
+    setZoneCurrentRadiusMeters(str);
+    const narrowedPercent = ir > 0 ? Math.round((1 - meters / ir) * 100) : 0;
+    debouncedZoneUpdate({ narrowed_percent: narrowedPercent });
+  }, [debouncedZoneUpdate, zoneQuery.data?.initial_radius, zoneRadius]);
 
   const handleZoneCenterChange = useCallback((lat: number, lng: number) => {
     setZoneLat(String(lat));
@@ -694,12 +697,13 @@ export default function EventDetailScreen() {
   }, [debouncedZoneUpdate]);
 
   const handleZoneReset = useCallback(() => {
-    Alert.alert('Reset Zone', 'Set the zone reveal back to 100%?', [
+    const ir = zoneQuery.data?.initial_radius ?? (parseInt(zoneRadius) || ZONE_RADIUS_DEFAULT);
+    Alert.alert('Reset Zone', 'Reset the zone back to full size?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Reset',
         onPress: () => {
-          setZoneNarrowedPercent('0');
+          setZoneCurrentRadiusMeters(String(ir));
           setZoneSyncStatus('saving');
           void (async () => {
             const { error } = await supabase
@@ -717,7 +721,7 @@ export default function EventDetailScreen() {
         },
       },
     ]);
-  }, [id, queryClient]);
+  }, [id, zoneQuery.data?.initial_radius, zoneRadius, queryClient]);
 
   // --- Handlers ---
   const handleStartHunt = useCallback(() => {
@@ -762,9 +766,8 @@ export default function EventDetailScreen() {
   }, [eventQuery, cluesQuery, zoneQuery]);
 
   // --- Computed zone values ---
-  const currentRadius = hasZone
-    ? Math.round((zone?.initial_radius ?? parseFloat(zoneRadius)) * (1 - (zone?.narrowed_percent ?? parseFloat(zoneNarrowedPercent)) / 100))
-    : null;
+  const initialRadius = hasZone ? (zone?.initial_radius ?? (parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT)) : ZONE_RADIUS_DEFAULT;
+  const currentRadius = hasZone ? (parseInt(zoneCurrentRadiusMeters) || 0) : null;
 
   if (eventQuery.isLoading) {
     return (
@@ -1201,15 +1204,16 @@ export default function EventDetailScreen() {
                 </View>
               )}
 
-              {/* Narrowed percent control */}
+              {/* Current radius control (meters) */}
               <View style={detailStyles.narrowControl}>
-                <Text style={detailStyles.narrowLabel}>NARROW ZONE</Text>
+                <Text style={detailStyles.narrowLabel}>CURRENT RADIUS</Text>
                 <View style={detailStyles.narrowRow}>
                   <TouchableOpacity
                     style={detailStyles.narrowBtn}
                     onPress={() => {
-                      const n = Math.max(0, parseInt(zoneNarrowedPercent, 10) - 5);
-                      handleZoneNarrowedChange(String(n));
+                      const cur = parseInt(zoneCurrentRadiusMeters) || 0;
+                      const next = Math.max(0, cur - 50);
+                      handleCurrentRadiusChange(String(next));
                     }}
                     activeOpacity={0.7}
                   >
@@ -1218,36 +1222,37 @@ export default function EventDetailScreen() {
                   <View style={detailStyles.narrowValueBox}>
                     <TextInput
                       style={detailStyles.narrowPercentInput}
-                      value={zoneNarrowedPercent}
+                      value={zoneCurrentRadiusMeters}
                       onChangeText={(t) => {
-                        handleZoneNarrowedChange(t);
+                        handleCurrentRadiusChange(t);
                       }}
                       onBlur={() => {
-                        if (!zoneNarrowedPercent) handleZoneNarrowedChange('0');
+                        if (!zoneCurrentRadiusMeters) {
+                          handleCurrentRadiusChange(String(initialRadius));
+                        }
                       }}
                       keyboardType="number-pad"
-                      maxLength={3}
-                      placeholder="0"
+                      maxLength={5}
+                      placeholder={String(Math.round(initialRadius))}
                       placeholderTextColor={Colors.textMuted}
                     />
-                    <Text style={detailStyles.narrowPercentSign}>%</Text>
+                    <Text style={detailStyles.narrowUnitLabel}>m</Text>
                   </View>
                   <TouchableOpacity
                     style={detailStyles.narrowBtn}
                     onPress={() => {
-                      const n = Math.min(100, parseInt(zoneNarrowedPercent, 10) + 5);
-                      handleZoneNarrowedChange(String(n));
+                      const cur = parseInt(zoneCurrentRadiusMeters) || 0;
+                      const next = Math.min(initialRadius, cur + 50);
+                      handleCurrentRadiusChange(String(next));
                     }}
                     activeOpacity={0.7}
                   >
                     <Plus size={18} color={Colors.cyan} />
                   </TouchableOpacity>
                 </View>
-                {currentRadius != null && (
-                  <Text style={detailStyles.narrowRadiusPreview}>
-                    Current radius: {currentRadius}m
-                  </Text>
-                )}
+                <Text style={detailStyles.narrowRadiusPreview}>
+                  Range: 0m — {Math.round(initialRadius)}m
+                </Text>
               </View>
 
               {/* Zone actions */}
@@ -1256,12 +1261,12 @@ export default function EventDetailScreen() {
                   style={detailStyles.zoneResetBtn}
                   onPress={handleZoneReset}
                   activeOpacity={0.7}
-                  disabled={parseInt(zoneNarrowedPercent, 10) === 0}
+                  disabled={currentRadius === Math.round(initialRadius)}
                 >
-                  <RotateCcw size={14} color={parseInt(zoneNarrowedPercent, 10) === 0 ? Colors.textMuted : Colors.amber} />
+                  <RotateCcw size={14} color={currentRadius === Math.round(initialRadius) ? Colors.textMuted : Colors.amber} />
                   <Text style={[
                     detailStyles.zoneResetBtnText,
-                    parseInt(zoneNarrowedPercent, 10) === 0 && { color: Colors.textMuted },
+                    currentRadius === Math.round(initialRadius) && { color: Colors.textMuted },
                   ]}>
                     RESET ZONE
                   </Text>
@@ -1803,7 +1808,7 @@ const detailStyles = StyleSheet.create({
     minWidth: 40,
     paddingVertical: 0,
   },
-  narrowPercentSign: {
+  narrowUnitLabel: {
     fontSize: 14,
     color: Colors.textSecondary,
     fontWeight: '600' as const,
