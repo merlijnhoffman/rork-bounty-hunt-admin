@@ -53,8 +53,7 @@ interface MediaAttachment {
 }
 
 const ZONE_DEBOUNCE_MS = 300;
-const ZONE_RADIUS_MIN = 50;
-const ZONE_RADIUS_MAX = 10000;
+const ZONE_RADIUS_MIN = 0;
 const ZONE_RADIUS_DEFAULT = 1000;
 
 function StatusBadge({ status }: { status: string }) {
@@ -628,8 +627,8 @@ export default function EventDetailScreen() {
       if (isNaN(lat) || isNaN(lng) || isNaN(radius)) {
         throw new Error('Please provide valid latitude, longitude, and radius.');
       }
-      if (radius < ZONE_RADIUS_MIN || radius > ZONE_RADIUS_MAX) {
-        throw new Error(`Radius must be between ${ZONE_RADIUS_MIN} and ${ZONE_RADIUS_MAX} meters.`);
+      if (radius < ZONE_RADIUS_MIN) {
+        throw new Error(`Radius must be at least ${ZONE_RADIUS_MIN} meters.`);
       }
 
       if (__DEV__) console.log('[EventDetail] Upserting zone for event:', id);
@@ -683,7 +682,7 @@ export default function EventDetailScreen() {
   const handleCurrentRadiusChange = useCallback((value: string) => {
     const cleaned = value.replace(/[^0-9]/g, '');
     const ir = zoneQuery.data?.initial_radius ?? (parseInt(zoneRadius) || ZONE_RADIUS_DEFAULT);
-    const meters = Math.max(0, Math.min(ir, parseInt(cleaned || '0', 10)));
+    const meters = Math.max(0, parseInt(cleaned || '0', 10));
     const str = cleaned === '' ? '' : String(meters);
     setZoneCurrentRadiusMeters(str);
     const narrowedPercent = ir > 0 ? Math.round((1 - meters / ir) * 100) : 0;
@@ -1046,7 +1045,7 @@ export default function EventDetailScreen() {
                     onPress={() => {
                       const current = parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT;
                       const step = current >= 1000 ? 500 : current >= 200 ? 100 : 50;
-                      setZoneRadius(String(Math.min(ZONE_RADIUS_MAX, current + step)));
+                      setZoneRadius(String(current + step));
                     }}
                     activeOpacity={0.7}
                   >
@@ -1242,7 +1241,7 @@ export default function EventDetailScreen() {
                     style={detailStyles.narrowBtn}
                     onPress={() => {
                       const cur = parseInt(zoneCurrentRadiusMeters) || 0;
-                      const next = Math.min(initialRadius, cur + 50);
+                      const next = cur + 50;
                       handleCurrentRadiusChange(String(next));
                     }}
                     activeOpacity={0.7}
@@ -1250,9 +1249,7 @@ export default function EventDetailScreen() {
                     <Plus size={18} color={Colors.cyan} />
                   </TouchableOpacity>
                 </View>
-                <Text style={detailStyles.narrowRadiusPreview}>
-                  Range: 0m — {Math.round(initialRadius)}m
-                </Text>
+
               </View>
 
               {/* Zone actions */}
