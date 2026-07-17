@@ -40,7 +40,7 @@ import {
   CheckCircle,
 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
-import { Event, Clue, EventZone } from '@/types';
+import { Event, Clue, EventZone, DEFAULT_ACCENT_COLOR } from '@/types';
 import Colors from '@/constants/colors';
 
 type MediaType = 'image' | 'video' | 'audio';
@@ -56,13 +56,13 @@ const ZONE_DEBOUNCE_MS = 300;
 const ZONE_RADIUS_MIN = 0;
 const ZONE_RADIUS_DEFAULT = 1000;
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, accent }: { status: string; accent: string }) {
   const color =
-    status === 'live' ? Colors.cyan :
+    status === 'live' ? accent :
     status === 'scheduled' ? Colors.amber :
     Colors.grey;
   const bgColor =
-    status === 'live' ? Colors.cyanDim :
+    status === 'live' ? `${accent}1A` :
     status === 'scheduled' ? Colors.amberDim :
     Colors.greyDim;
 
@@ -804,11 +804,13 @@ export default function EventDetailScreen() {
     );
   }
 
+  const accent = event.accent_color ?? DEFAULT_ACCENT_COLOR;
+
   return (
     <>
       <Stack.Screen
         options={{
-          title: event.city.toUpperCase(),
+          title: (event.title ?? event.city).toUpperCase(),
           headerStyle: { backgroundColor: Colors.bg },
           headerTintColor: Colors.white,
           headerTitleStyle: { fontSize: 14, letterSpacing: 2, fontWeight: '700' },
@@ -828,11 +830,17 @@ export default function EventDetailScreen() {
         style={detailStyles.container}
         contentContainerStyle={detailStyles.scroll}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={Colors.cyan} />
+          <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={accent} />
         }
       >
         {/* Event Info Card */}
         <View style={detailStyles.infoCard}>
+          {event.title && (
+            <View style={detailStyles.infoRow}>
+              <Text style={detailStyles.infoLabel}>Title</Text>
+              <Text style={detailStyles.infoValue}>{event.title}</Text>
+            </View>
+          )}
           <View style={detailStyles.infoRow}>
             <Text style={detailStyles.infoLabel}>City</Text>
             <Text style={detailStyles.infoValue}>{event.city}</Text>
@@ -851,7 +859,7 @@ export default function EventDetailScreen() {
           </View>
           <View style={detailStyles.infoRow}>
             <Text style={detailStyles.infoLabel}>Status</Text>
-            <StatusBadge status={event.status} />
+            <StatusBadge status={event.status} accent={accent} />
           </View>
         </View>
 
@@ -860,7 +868,7 @@ export default function EventDetailScreen() {
         <View style={detailStyles.statusButtons}>
           {event.status === 'scheduled' && (
             <TouchableOpacity
-              style={detailStyles.startButton}
+              style={[detailStyles.startButton, { backgroundColor: accent }]}
               onPress={handleStartHunt}
               disabled={statusMutation.isPending}
               activeOpacity={0.7}

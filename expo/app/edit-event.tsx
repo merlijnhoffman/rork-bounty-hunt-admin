@@ -14,7 +14,7 @@ import {
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { Event } from '@/types';
+import { Event, EVENT_COLORS, DEFAULT_ACCENT_COLOR } from '@/types';
 import Colors from '@/constants/colors';
 
 export default function EditEventScreen() {
@@ -22,9 +22,11 @@ export default function EditEventScreen() {
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
 
+  const [title, setTitle] = useState<string>('');
   const [city, setCity] = useState<string>('');
   const [date, setDate] = useState<string>('');
   const [startTime, setStartTime] = useState<string>('');
+  const [accentColor, setAccentColor] = useState<string>(DEFAULT_ACCENT_COLOR);
   const [price, setPrice] = useState<string>('');
   const [prizeAmount, setPrizeAmount] = useState<string>('');
   const [isFree, setIsFree] = useState<boolean>(false);
@@ -46,9 +48,11 @@ export default function EditEventScreen() {
   useEffect(() => {
     if (eventQuery.data) {
       const e = eventQuery.data;
+      setTitle(e.title ?? '');
       setCity(e.city);
       setDate(e.date);
       setStartTime(e.start_time);
+      setAccentColor(e.accent_color ?? DEFAULT_ACCENT_COLOR);
       const priceValue = e.price ?? 0;
       setPrice(String(priceValue));
       setPrizeAmount(String(e.prize_amount));
@@ -59,9 +63,11 @@ export default function EditEventScreen() {
   const updateMutation = useMutation({
     mutationFn: async () => {
       const updateData: Record<string, unknown> = {
+        title: title.trim(),
         city: city.trim(),
         date: date.trim(),
         start_time: startTime.trim(),
+        accent_color: accentColor,
         price: isFree ? 0 : parseFloat(price),
         prize_amount: parseFloat(prizeAmount),
       };
@@ -113,7 +119,7 @@ export default function EditEventScreen() {
     );
   }
 
-  const isValid = city && date && startTime && (isFree || price) && prizeAmount;
+  const isValid = title && city && date && startTime && (isFree || price) && prizeAmount;
 
   return (
     <>
@@ -130,14 +136,48 @@ export default function EditEventScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <EditField label="CITY" value={city} onChangeText={setCity} />
-          <EditField label="DATE" value={date} onChangeText={setDate} placeholder="2026-04-15" />
-          <EditField label="START TIME" value={startTime} onChangeText={setStartTime} placeholder="14:00" />
+          <EditField label="EVENT TITLE" value={title} onChangeText={setTitle} placeholder="Amsterdam Treasure Hunt" />
+          <EditField label="LOCATION" value={city} onChangeText={setCity} />
+          <View style={styles.row}>
+            <View style={styles.halfField}>
+              <EditField label="DATE" value={date} onChangeText={setDate} placeholder="2026-04-15" />
+            </View>
+            <View style={styles.halfField}>
+              <EditField label="START TIME" value={startTime} onChangeText={setStartTime} placeholder="14:00" />
+            </View>
+          </View>
+
+          {/* Color Picker */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>EVENT COLOR</Text>
+            <View style={styles.colorGrid}>
+              {EVENT_COLORS.map((color) => {
+                const selected = accentColor === color.hex;
+                return (
+                  <TouchableOpacity
+                    key={color.hex}
+                    style={[
+                      styles.colorSwatch,
+                      { backgroundColor: color.hex },
+                      selected && styles.colorSwatchSelected,
+                    ]}
+                    onPress={() => setAccentColor(color.hex)}
+                    activeOpacity={0.7}
+                  >
+                    {selected && <Text style={styles.colorCheck}>✓</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.colorHint}>
+              {EVENT_COLORS.find((c) => c.hex === accentColor)?.label ?? 'Custom'} — accent color for this event
+            </Text>
+          </View>
 
           <View style={styles.row}>
             <View style={styles.halfField}>
               <EditField
-                label="PRICE (EUR)"
+                label="TICKET PRICE (EUR)"
                 value={isFree ? '0' : price}
                 onChangeText={setPrice}
                 keyboardType="decimal-pad"
@@ -154,14 +194,14 @@ export default function EditEventScreen() {
             onPress={() => setIsFree((v) => !v)}
             activeOpacity={0.7}
           >
-            <View style={[styles.freeIndicator, isFree && styles.freeIndicatorOn]}>
+            <View style={[styles.freeIndicator, isFree && { borderColor: accentColor, backgroundColor: accentColor }]}>
               {isFree && <Text style={styles.freeCheck}>✓</Text>}
             </View>
             <Text style={styles.freeLabel}>FREE EVENT</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.saveButton, !isValid && styles.buttonDisabled]}
+            style={[styles.saveButton, !isValid && styles.buttonDisabled, { backgroundColor: accentColor }]}
             onPress={() => updateMutation.mutate()}
             disabled={updateMutation.isPending || !isValid}
             activeOpacity={0.7}
@@ -198,7 +238,7 @@ function EditField({
     <View style={styles.inputGroup}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, !editable && styles.inputDisabled]}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
@@ -253,6 +293,36 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 16,
   },
+  inputDisabled: {
+    opacity: 0.4,
+  },
+  colorGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingTop: 4,
+  },
+  colorSwatch: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  colorSwatchSelected: {
+    borderWidth: 3,
+    borderColor: Colors.white,
+  },
+  colorCheck: {
+    color: Colors.bg,
+    fontSize: 16,
+    fontWeight: '700' as const,
+  },
+  colorHint: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    paddingTop: 2,
+  },
   freeToggle: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -269,10 +339,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  freeIndicatorOn: {
-    borderColor: Colors.cyan,
-    backgroundColor: Colors.cyan,
-  },
   freeCheck: {
     color: Colors.bg,
     fontSize: 14,
@@ -286,7 +352,6 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
   },
   saveButton: {
-    backgroundColor: Colors.cyan,
     borderRadius: 10,
     paddingVertical: 16,
     alignItems: 'center',

@@ -13,16 +13,16 @@ import { useQuery } from '@tanstack/react-query';
 import { Plus, MapPin, Calendar, Trophy, Ticket, LogOut } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { Event } from '@/types';
+import { Event, DEFAULT_ACCENT_COLOR } from '@/types';
 import Colors from '@/constants/colors';
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, accent }: { status: string; accent: string }) {
   const color =
-    status === 'live' ? Colors.cyan :
+    status === 'live' ? accent :
     status === 'scheduled' ? Colors.amber :
     Colors.grey;
   const bgColor =
-    status === 'live' ? Colors.cyanDim :
+    status === 'live' ? `${accent}1A` :
     status === 'scheduled' ? Colors.amberDim :
     Colors.greyDim;
 
@@ -64,7 +64,9 @@ export default function DashboardScreen() {
     },
   });
 
-  const renderEvent = useCallback(({ item }: { item: Event }) => (
+  const renderEvent = useCallback(({ item }: { item: Event }) => {
+    const accent = item.accent_color ?? DEFAULT_ACCENT_COLOR;
+    return (
     <TouchableOpacity
       style={styles.card}
       onPress={() => router.push({ pathname: '/event-detail', params: { id: item.id } })}
@@ -73,10 +75,13 @@ export default function DashboardScreen() {
     >
       <View style={styles.cardHeader}>
         <View style={styles.cityRow}>
-          <MapPin size={16} color={Colors.cyan} />
-          <Text style={styles.cityText}>{item.city}</Text>
+          <MapPin size={16} color={accent} />
+          <View style={styles.titleColumn}>
+            <Text style={styles.titleText} numberOfLines={1}>{item.title ?? item.city}</Text>
+            <Text style={styles.cityText}>{item.city}</Text>
+          </View>
         </View>
-        <StatusBadge status={item.status} />
+        <StatusBadge status={item.status} accent={accent} />
       </View>
 
       <View style={styles.cardDetails}>
@@ -94,7 +99,8 @@ export default function DashboardScreen() {
         </View>
       </View>
     </TouchableOpacity>
-  ), [router]);
+    );
+  }, [router]);
 
   return (
     <>
@@ -193,10 +199,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  cityText: {
-    fontSize: 18,
-    fontWeight: '600' as const,
+  titleColumn: {
+    flexDirection: 'column',
+    gap: 1,
+  },
+  titleText: {
+    fontSize: 17,
+    fontWeight: '700' as const,
     color: Colors.white,
+  },
+  cityText: {
+    fontSize: 13,
+    fontWeight: '400' as const,
+    color: Colors.textSecondary,
   },
   badge: {
     flexDirection: 'row',
