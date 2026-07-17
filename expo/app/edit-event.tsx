@@ -22,7 +22,6 @@ export default function EditEventScreen() {
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  const [title, setTitle] = useState<string>('');
   const [city, setCity] = useState<string>('');
   const [date, setDate] = useState<string>('');
   const [startTime, setStartTime] = useState<string>('');
@@ -48,7 +47,6 @@ export default function EditEventScreen() {
   useEffect(() => {
     if (eventQuery.data) {
       const e = eventQuery.data;
-      setTitle(e.title ?? '');
       setCity(e.city);
       setDate(e.date);
       setStartTime(e.start_time);
@@ -63,7 +61,7 @@ export default function EditEventScreen() {
   const updateMutation = useMutation({
     mutationFn: async () => {
       const updateData: Record<string, unknown> = {
-        title: title.trim(),
+        title: city.trim(),
         city: city.trim(),
         date: date.trim(),
         start_time: startTime.trim(),
@@ -119,7 +117,7 @@ export default function EditEventScreen() {
     );
   }
 
-  const isValid = title && city && date && startTime && (isFree || price) && prizeAmount;
+  const isValid = city && date && startTime && (isFree || price) && prizeAmount;
 
   return (
     <>
@@ -136,7 +134,6 @@ export default function EditEventScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <EditField label="EVENT TITLE" value={title} onChangeText={setTitle} placeholder="Amsterdam Treasure Hunt" />
           <EditField label="LOCATION" value={city} onChangeText={setCity} />
           <View style={styles.row}>
             <View style={styles.halfField}>

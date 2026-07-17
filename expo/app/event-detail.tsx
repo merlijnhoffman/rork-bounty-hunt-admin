@@ -810,7 +810,7 @@ export default function EventDetailScreen() {
     <>
       <Stack.Screen
         options={{
-          title: (event.title ?? event.city).toUpperCase(),
+          title: event.city.toUpperCase(),
           headerStyle: { backgroundColor: Colors.bg },
           headerTintColor: Colors.white,
           headerTitleStyle: { fontSize: 14, letterSpacing: 2, fontWeight: '700' },
@@ -835,14 +835,8 @@ export default function EventDetailScreen() {
       >
         {/* Event Info Card */}
         <View style={detailStyles.infoCard}>
-          {event.title && (
-            <View style={detailStyles.infoRow}>
-              <Text style={detailStyles.infoLabel}>Title</Text>
-              <Text style={detailStyles.infoValue}>{event.title}</Text>
-            </View>
-          )}
           <View style={detailStyles.infoRow}>
-            <Text style={detailStyles.infoLabel}>City</Text>
+            <Text style={detailStyles.infoLabel}>Location</Text>
             <Text style={detailStyles.infoValue}>{event.city}</Text>
           </View>
           <View style={detailStyles.infoRow}>

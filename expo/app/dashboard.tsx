@@ -76,10 +76,7 @@ export default function DashboardScreen() {
       <View style={styles.cardHeader}>
         <View style={styles.cityRow}>
           <MapPin size={16} color={accent} />
-          <View style={styles.titleColumn}>
-            <Text style={styles.titleText} numberOfLines={1}>{item.title ?? item.city}</Text>
-            <Text style={styles.cityText}>{item.city}</Text>
-          </View>
+          <Text style={styles.titleText} numberOfLines={1}>{item.city}</Text>
         </View>
         <StatusBadge status={item.status} accent={accent} />
       </View>
@@ -199,19 +196,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  titleColumn: {
-    flexDirection: 'column',
-    gap: 1,
-  },
   titleText: {
     fontSize: 17,
     fontWeight: '700' as const,
     color: Colors.white,
-  },
-  cityText: {
-    fontSize: 13,
-    fontWeight: '400' as const,
-    color: Colors.textSecondary,
   },
   badge: {
     flexDirection: 'row',

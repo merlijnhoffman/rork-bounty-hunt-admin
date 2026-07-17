@@ -21,7 +21,6 @@ export default function CreateEventScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const [title, setTitle] = useState<string>('');
   const [city, setCity] = useState<string>('');
   const [date, setDate] = useState<string>('');
   const [startTime, setStartTime] = useState<string>('');
@@ -32,9 +31,9 @@ export default function CreateEventScreen() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      if (__DEV__) console.log('[CreateEvent] Creating event:', title, city);
+      if (__DEV__) console.log('[CreateEvent] Creating event:', city);
       const insertData: Record<string, unknown> = {
-        title: title.trim(),
+        title: city.trim(),
         city: city.trim(),
         date: date.trim(),
         start_time: startTime.trim(),
@@ -59,7 +58,7 @@ export default function CreateEventScreen() {
     },
   });
 
-  const isValid = title && city && date && startTime && (isFree || price) && prizeAmount;
+  const isValid = city && date && startTime && (isFree || price) && prizeAmount;
 
   return (
     <>
@@ -76,12 +75,6 @@ export default function CreateEventScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <InputField
-            label="EVENT TITLE"
-            value={title}
-            onChangeText={setTitle}
-            placeholder="Amsterdam Treasure Hunt"
-          />
           <InputField
             label="LOCATION"
             value={city}
