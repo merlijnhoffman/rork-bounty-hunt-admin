@@ -7,6 +7,7 @@ export interface Event {
   price: number;
   prize_amount: number;
   accent_color: string | null;
+  bounty_access_code: string | null;
   is_active: boolean;
   status: 'scheduled' | 'live' | 'completed';
   created_at: string;
@@ -93,4 +94,57 @@ export interface PlayerConnection {
 export interface PlayerWithProfile {
   ticket: Ticket;
   profile: Profile | null;
+}
+
+/** Live GPS position of the bounty person for an event. One row per event_id. */
+export interface BountyLocation {
+  event_id: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  heading: number | null;
+  speed: number | null;
+  is_active: boolean;
+  updated_at: string;
+  created_at: string;
+}
+
+/** Computed bounty broadcast status used by the admin UI. */
+export type BountyStatus =
+  | 'not_started'   // no row in bounty_locations yet
+  | 'broadcasting'  // is_active && updated_at within 5 min
+  | 'signal_lost'   // is_active && updated_at older than 5 min
+  | 'stopped';      // is_active === false
+
+/** Stale threshold for bounty signal-lost detection. */
+export const BOUNTY_STALE_MS = 5 * 60 * 1000;
+
+/** Ambiguous characters removed from generated access codes. */
+const BOUNTY_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/**
+ * Generate a bounty access code in the format BOUNTY-{CITY}-{5 random alphanumeric chars}.
+ * Uppercase, no ambiguous characters (O/0/I/1).
+ */
+export function generateBountyAccessCode(city: string): string {
+  const cityPart = (city.trim() || 'ZONE')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 20) || 'ZONE';
+  let suffix = '';
+  for (let i = 0; i < 5; i++) {
+    suffix += BOUNTY_CODE_ALPHABET[Math.floor(Math.random() * BOUNTY_CODE_ALPHABET.length)];
+  }
+  return `BOUNTY-${cityPart}-${suffix}`;
+}
+
+/**
+ * Determine the bounty broadcast status from a BountyLocation row (or null).
+ */
+export function getBountyStatus(location: BountyLocation | null | undefined): BountyStatus {
+  if (!location) return 'not_started';
+  if (!location.is_active) return 'stopped';
+  const ageMs = Date.now() - new Date(location.updated_at).getTime();
+  return ageMs <= BOUNTY_STALE_MS ? 'broadcasting' : 'signal_lost';
 }

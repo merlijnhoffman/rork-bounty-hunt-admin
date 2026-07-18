@@ -16,6 +16,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Event, EVENT_COLORS, DEFAULT_ACCENT_COLOR } from '@/types';
 import Colors from '@/constants/colors';
+import { BountyAccessCodeEditor } from '@/components/BountyAccessCodeEditor';
 
 export default function EditEventScreen() {
   const router = useRouter();
@@ -29,6 +30,7 @@ export default function EditEventScreen() {
   const [price, setPrice] = useState<string>('');
   const [prizeAmount, setPrizeAmount] = useState<string>('');
   const [isFree, setIsFree] = useState<boolean>(false);
+  const [bountyAccessCode, setBountyAccessCode] = useState<string>('');
 
   const eventQuery = useQuery({
     queryKey: ['event', id],
@@ -55,6 +57,7 @@ export default function EditEventScreen() {
       setPrice(String(priceValue));
       setPrizeAmount(String(e.prize_amount));
       setIsFree(priceValue === 0);
+      setBountyAccessCode(e.bounty_access_code ?? '');
     }
   }, [eventQuery.data]);
 
@@ -68,6 +71,7 @@ export default function EditEventScreen() {
         accent_color: accentColor,
         price: isFree ? 0 : parseFloat(price),
         prize_amount: parseFloat(prizeAmount),
+        bounty_access_code: bountyAccessCode.trim() || null,
       };
       if (__DEV__) console.log('[EditEvent] Updating event:', id, 'with data:', JSON.stringify(updateData));
 
@@ -196,6 +200,15 @@ export default function EditEventScreen() {
             </View>
             <Text style={styles.freeLabel}>FREE EVENT</Text>
           </TouchableOpacity>
+
+          <BountyAccessCodeEditor
+            value={bountyAccessCode}
+            city={city}
+            onChange={setBountyAccessCode}
+            accentColor={accentColor}
+            warnWhenLive
+            isLive={eventQuery.data?.status === 'live'}
+          />
 
           <TouchableOpacity
             style={[styles.saveButton, !isValid && styles.buttonDisabled, { backgroundColor: accentColor }]}

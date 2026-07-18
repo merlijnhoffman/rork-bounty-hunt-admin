@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -10,10 +10,10 @@ import {
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, MapPin, Calendar, Trophy, Ticket, LogOut } from 'lucide-react-native';
+import { Plus, MapPin, Calendar, Trophy, Ticket, LogOut, Crosshair } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { Event, DEFAULT_ACCENT_COLOR } from '@/types';
+import { Event, BountyLocation, DEFAULT_ACCENT_COLOR, getBountyStatus } from '@/types';
 import Colors from '@/constants/colors';
 
 function StatusBadge({ status, accent }: { status: string; accent: string }) {
@@ -34,9 +34,34 @@ function StatusBadge({ status, accent }: { status: string; accent: string }) {
   );
 }
 
+/** Pulsing-dot bounty status badge. Re-renders periodically so "signal lost" can trigger as time passes. */
+function BountyBadge({ location }: { location: BountyLocation | null | undefined }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const i = setInterval(() => tick((n) => n + 1), 15000);
+    return () => clearInterval(i);
+  }, []);
+
+  const status = getBountyStatus(location);
+  const config: Record<string, { color: string; bg: string; label: string; pulse: boolean }> = {
+    not_started:  { color: Colors.grey,   bg: Colors.greyDim,  label: 'BOUNTY NOT STARTED',    pulse: false },
+    broadcasting: { color: '#22C55E',    bg: 'rgba(34, 197, 94, 0.15)', label: 'BOUNTY BROADCASTING', pulse: true },
+    signal_lost:  { color: Colors.amber, bg: Colors.amberDim, label: 'BOUNTY SIGNAL LOST',    pulse: false },
+    stopped:      { color: Colors.red,   bg: Colors.redDim,   label: 'BOUNTY STOPPED',        pulse: false },
+  };
+  const c = config[status];
+  return (
+    <View style={[styles.badge, { backgroundColor: c.bg, marginTop: 12 }]}>
+      <View style={[styles.badgeDot, { backgroundColor: c.color }, c.pulse && styles.badgeDotPulse]} />
+      <Text style={[styles.badgeText, { color: c.color }]}>{c.label}</Text>
+    </View>
+  );
+}
+
 export default function DashboardScreen() {
   const router = useRouter();
   const { signOut } = useAuth();
+  const [bountyMap, setBountyMap] = useState<Record<string, BountyLocation | null>>({});
 
   const eventsQuery = useQuery({
     queryKey: ['events'],
@@ -63,6 +88,65 @@ export default function DashboardScreen() {
       return eventsWithCounts;
     },
   });
+
+  // Fetch bounty_locations for live events so we can show a status badge per card.
+  const liveEventIds = (eventsQuery.data ?? []).filter((e) => e.status === 'live').map((e) => e.id);
+  const liveEventIdsKey = liveEventIds.join(',');
+  useEffect(() => {
+    if (liveEventIds.length === 0) {
+      setBountyMap({});
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const { data, error } = await supabase
+        .from('bounty_locations')
+        .select('*')
+        .in('event_id', liveEventIds);
+      if (error) {
+        if (__DEV__) console.warn('[Dashboard] bounty_locations fetch failed:', error.message);
+        return;
+      }
+      if (cancelled) return;
+      const map: Record<string, BountyLocation | null> = {};
+      for (const id of liveEventIds) map[id] = null;
+      for (const row of data ?? []) {
+        map[(row as BountyLocation).event_id] = row as BountyLocation;
+      }
+      setBountyMap(map);
+    };
+    void load();
+  }, [liveEventIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Realtime: refresh bounty_locations when any row changes.
+  useEffect(() => {
+    if (liveEventIds.length === 0) return;
+    const channel = supabase
+      .channel('dashboard-bounty-locations')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bounty_locations' },
+        () => {
+          void supabase
+            .from('bounty_locations')
+            .select('*')
+            .in('event_id', liveEventIds)
+            .then(({ data }) => {
+              if (!data) return;
+              const map: Record<string, BountyLocation | null> = {};
+              for (const id of liveEventIds) map[id] = null;
+              for (const row of data) {
+                map[(row as BountyLocation).event_id] = row as BountyLocation;
+              }
+              setBountyMap(map);
+            });
+        }
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [liveEventIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const renderEvent = useCallback(({ item }: { item: Event }) => {
     const accent = item.accent_color ?? DEFAULT_ACCENT_COLOR;
@@ -95,9 +179,20 @@ export default function DashboardScreen() {
           <Text style={[styles.detailText, { color: Colors.amber }]}>€{item.prize_amount}</Text>
         </View>
       </View>
+
+      {item.status === 'live' ? (
+        <BountyBadge location={bountyMap[item.id]} />
+      ) : (
+        <View style={styles.bountyRowHint}>
+          <Crosshair size={11} color={Colors.textMuted} />
+          <Text style={styles.bountyHintText}>
+            {item.bounty_access_code ? 'Bounty code set' : 'No bounty code set'}
+          </Text>
+        </View>
+      )}
     </TouchableOpacity>
     );
-  }, [router]);
+  }, [router, bountyMap]);
 
   return (
     <>
@@ -231,6 +326,27 @@ const styles = StyleSheet.create({
   detailText: {
     fontSize: 13,
     color: Colors.textSecondary,
+  },
+  badgeDotPulse: {
+    shadowColor: '#22C55E',
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
+  },
+  bountyRowHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.cardBorder,
+  },
+  bountyHintText: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    letterSpacing: 0.3,
   },
   fab: {
     position: 'absolute',

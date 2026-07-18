@@ -38,10 +38,15 @@ import {
   Plus,
   Crosshair,
   CheckCircle,
+  Key,
+  RefreshCw,
+  Radio,
 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
-import { Event, Clue, EventZone, DEFAULT_ACCENT_COLOR } from '@/types';
+import { Event, Clue, EventZone, BountyLocation, DEFAULT_ACCENT_COLOR, generateBountyAccessCode, getBountyStatus } from '@/types';
 import Colors from '@/constants/colors';
+import { BountyAccessCodeEditor } from '@/components/BountyAccessCodeEditor';
+import { LiveBountyMap } from '@/components/LiveBountyMap';
 
 type MediaType = 'image' | 'video' | 'audio';
 
@@ -177,6 +182,7 @@ export default function EventDetailScreen() {
   const [zoneSyncStatus, setZoneSyncStatus] = useState<'idle' | 'saving' | 'synced'>('idle');
 
   const zoneSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [bountyCode, setBountyCode] = useState<string>('');
 
   // --- Queries ---
   const eventQuery = useQuery({
@@ -245,6 +251,33 @@ export default function EventDetailScreen() {
     }
   }, [zoneQuery.data]);
 
+  // Sync bounty_access_code from the event row.
+  useEffect(() => {
+    setBountyCode(eventQuery.data?.bounty_access_code ?? '');
+  }, [eventQuery.data?.bounty_access_code]);
+
+  // --- Bounty location query + realtime ---
+  const bountyLocationQuery = useQuery({
+    queryKey: ['bountyLocation', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('bounty_locations')
+        .select('*')
+        .eq('event_id', id)
+        .maybeSingle();
+      if (error) throw error;
+      return data as BountyLocation | null;
+    },
+    enabled: !!id,
+  });
+
+  // Re-render periodically so "signal lost" status updates as time passes.
+  const [, bountyTick] = useState(0);
+  useEffect(() => {
+    const i = setInterval(() => bountyTick((n) => n + 1), 15000);
+    return () => clearInterval(i);
+  }, []);
+
   // Cleanup debounce timer on unmount
   useEffect(() => {
     return () => {
@@ -281,6 +314,14 @@ export default function EventDetailScreen() {
         () => {
           if (__DEV__) console.log('[EventDetail] event_zones change detected');
           void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bounty_locations', filter: `event_id=eq.${id}` },
+        () => {
+          if (__DEV__) console.log('[EventDetail] bounty_locations change detected');
+          void queryClient.invalidateQueries({ queryKey: ['bountyLocation', id] });
         }
       )
       .subscribe();
@@ -751,6 +792,48 @@ export default function EventDetailScreen() {
     ]);
   }, [deleteClueMutation]);
 
+  // --- Bounty code mutations ---
+  const persistBountyCode = useCallback(async (code: string): Promise<void> => {
+    const { error } = await supabase
+      .from('events')
+      .update({ bounty_access_code: code || null })
+      .eq('id', id);
+    if (error) throw new Error(error.message);
+    void queryClient.invalidateQueries({ queryKey: ['event', id] });
+    void queryClient.invalidateQueries({ queryKey: ['events'] });
+  }, [id, queryClient]);
+
+  const regenerateBountyCode = useCallback(() => {
+    const ev = eventQuery.data;
+    if (ev?.status && ev.status !== 'scheduled') {
+      Alert.alert(
+        'Cannot regenerate',
+        'Codes can only be regenerated while the event is scheduled, to avoid breaking an active broadcast.',
+      );
+      return;
+    }
+    Alert.alert(
+      'Regenerate code',
+      'The old code will stop working immediately and the bounty person will need the new code. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Regenerate',
+          style: 'destructive',
+          onPress: () => {
+            const newCode = generateBountyAccessCode(ev?.city ?? '');
+            void persistBountyCode(newCode)
+              .then(() => setBountyCode(newCode))
+              .catch((err) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                Alert.alert('Error', msg);
+              });
+          },
+        },
+      ],
+    );
+  }, [eventQuery.data, persistBountyCode]);
+
   const canSendClue = clueText.trim().length > 0 || mediaAttachment !== null;
 
   const event = eventQuery.data;
@@ -856,6 +939,42 @@ export default function EventDetailScreen() {
             <StatusBadge status={event.status} accent={accent} />
           </View>
         </View>
+
+        {/* Bounty Access Code */}
+        <Text style={detailStyles.sectionTitle}>BOUNTY ACCESS CODE</Text>
+        <BountyAccessCodeEditor
+          value={bountyCode}
+          city={event.city}
+          onChange={setBountyCode}
+          onPersist={persistBountyCode}
+          mode="standalone"
+          accentColor={accent}
+          warnWhenLive
+          isLive={event.status === 'live'}
+        />
+        {event.status === 'scheduled' && bountyCode.trim() && (
+          <TouchableOpacity
+            style={[detailStyles.regenerateBtn, { borderColor: accent }]}
+            onPress={regenerateBountyCode}
+            activeOpacity={0.7}
+          >
+            <RefreshCw size={14} color={accent} />
+            <Text style={[detailStyles.regenerateBtnText, { color: accent }]}>
+              REGENERATE CODE
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Live Bounty Map */}
+        <Text style={detailStyles.sectionTitle}>LIVE BOUNTY TRACKING</Text>
+        <LiveBountyMap
+          eventId={id}
+          accent={accent}
+          zone={zone}
+          bountyLocation={bountyLocationQuery.data}
+          isLoading={bountyLocationQuery.isLoading}
+          eventStatus={event.status}
+        />
 
         {/* Status Control */}
         <Text style={detailStyles.sectionTitle}>STATUS CONTROL</Text>
@@ -1481,6 +1600,21 @@ const detailStyles = StyleSheet.create({
     letterSpacing: 1.5,
     fontWeight: '700' as const,
     marginTop: 8,
+  },
+  regenerateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    marginTop: 8,
+  },
+  regenerateBtnText: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    letterSpacing: 1.2,
   },
   statusButtons: {
     gap: 10,

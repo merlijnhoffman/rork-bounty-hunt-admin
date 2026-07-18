@@ -16,6 +16,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import Colors from '@/constants/colors';
 import { EVENT_COLORS, DEFAULT_ACCENT_COLOR } from '@/types';
+import { BountyAccessCodeEditor } from '@/components/BountyAccessCodeEditor';
 
 export default function CreateEventScreen() {
   const router = useRouter();
@@ -28,6 +29,7 @@ export default function CreateEventScreen() {
   const [price, setPrice] = useState<string>('');
   const [prizeAmount, setPrizeAmount] = useState<string>('');
   const [isFree, setIsFree] = useState<boolean>(false);
+  const [bountyAccessCode, setBountyAccessCode] = useState<string>('');
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -40,6 +42,7 @@ export default function CreateEventScreen() {
         accent_color: accentColor,
         price: isFree ? 0 : parseFloat(price) || 0,
         prize_amount: parseFloat(prizeAmount) || 0,
+        bounty_access_code: bountyAccessCode.trim() || null,
         is_active: true,
         status: 'scheduled',
       };
@@ -149,6 +152,13 @@ export default function CreateEventScreen() {
             </View>
             <Text style={styles.freeLabel}>FREE EVENT</Text>
           </TouchableOpacity>
+
+          <BountyAccessCodeEditor
+            value={bountyAccessCode}
+            city={city}
+            onChange={setBountyAccessCode}
+            accentColor={accentColor}
+          />
 
           <TouchableOpacity
             style={[styles.createButton, !isValid && styles.buttonDisabled, { backgroundColor: accentColor }]}
