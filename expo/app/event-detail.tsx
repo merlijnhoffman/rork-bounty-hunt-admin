@@ -41,9 +41,23 @@ import {
   Key,
   RefreshCw,
   Radio,
+  Trophy,
 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
-import { Event, Clue, EventZone, BountyLocation, DEFAULT_ACCENT_COLOR, generateBountyAccessCode, getBountyStatus } from '@/types';
+import {
+  Event,
+  Clue,
+  EventZone,
+  EventWinner,
+  BountyLocation,
+  DEFAULT_ACCENT_COLOR,
+  ZONE_RADIUS_MIN as ZONE_RADIUS_MIN_CONST,
+  ZONE_RADIUS_MAX,
+  ZONE_RADIUS_STEP,
+  generateBountyAccessCode,
+  getBountyStatus,
+  deriveNarrowedPercent,
+} from '@/types';
 import Colors from '@/constants/colors';
 import { BountyAccessCodeEditor } from '@/components/BountyAccessCodeEditor';
 import { LiveBountyMap } from '@/components/LiveBountyMap';
@@ -58,7 +72,7 @@ interface MediaAttachment {
 }
 
 const ZONE_DEBOUNCE_MS = 300;
-const ZONE_RADIUS_MIN = 0;
+const ZONE_RADIUS_MIN = ZONE_RADIUS_MIN_CONST; // 100m — imported from types
 const ZONE_RADIUS_DEFAULT = 1000;
 
 function StatusBadge({ status, accent }: { status: string; accent: string }) {
@@ -75,6 +89,55 @@ function StatusBadge({ status, accent }: { status: string; accent: string }) {
     <View style={[detailStyles.badge, { backgroundColor: bgColor }]}>
       <View style={[detailStyles.badgeDot, { backgroundColor: color }]} />
       <Text style={[detailStyles.badgeText, { color }]}>{status.toUpperCase()}</Text>
+    </View>
+  );
+}
+
+/** Renders the declared winner banner. Subscribes to realtime via the parent's
+ *  react-query invalidation on event_winners. */
+function WinnerCard({ winner, accent }: { winner: EventWinner | null; accent: string }) {
+  if (!winner) return null;
+  const declaredAt = new Date(winner.declared_at);
+  return (
+    <View style={detailStyles.winnerCard}>
+      <View style={detailStyles.winnerHeaderRow}>
+        <Trophy size={16} color={Colors.amber} />
+        <Text style={detailStyles.winnerTitle}>WINNER DECLARED</Text>
+        <View style={[detailStyles.winnerBadge, { backgroundColor: Colors.amberDim }]}>
+          <CheckCircle size={11} color={Colors.amber} />
+          <Text style={detailStyles.winnerBadgeText}>COMPLETED</Text>
+        </View>
+      </View>
+      <View style={detailStyles.winnerInfoGrid}>
+        <View style={detailStyles.winnerInfoItem}>
+          <Text style={detailStyles.winnerInfoLabel}>PLAYER ID</Text>
+          <Text style={detailStyles.winnerInfoValue} numberOfLines={1}>
+            {winner.winner_user_id}
+          </Text>
+        </View>
+        {winner.winner_email ? (
+          <View style={detailStyles.winnerInfoItem}>
+            <Text style={detailStyles.winnerInfoLabel}>EMAIL</Text>
+            <Text style={detailStyles.winnerInfoValue} numberOfLines={1}>
+              {winner.winner_email}
+            </Text>
+          </View>
+        ) : null}
+        <View style={detailStyles.winnerInfoItem}>
+          <Text style={detailStyles.winnerInfoLabel}>VERIFICATION CODE</Text>
+          <Text style={detailStyles.winnerInfoValueMono}>{winner.verification_code}</Text>
+        </View>
+        {winner.declare_distance_m != null ? (
+          <View style={detailStyles.winnerInfoItem}>
+            <Text style={detailStyles.winnerInfoLabel}>DISTANCE</Text>
+            <Text style={detailStyles.winnerInfoValue}>{winner.declare_distance_m} m</Text>
+          </View>
+        ) : null}
+        <View style={detailStyles.winnerInfoItem}>
+          <Text style={detailStyles.winnerInfoLabel}>DECLARED AT</Text>
+          <Text style={detailStyles.winnerInfoValue}>{declaredAt.toLocaleString()}</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -238,7 +301,11 @@ export default function EventDetailScreen() {
     enabled: !!id,
   });
 
-  // Sync zone query data into local state when it loads
+  // Sync zone query data into local state when it loads.
+  // IMPORTANT: read current_radius from the row when present; only fall back to
+  // the narrowed formula (initial * (1 - narrowed/100)) when the column is null.
+  // This matches the player app's contract and lets the admin expand the zone
+  // above initial_radius.
   useEffect(() => {
     const zone = zoneQuery.data;
     if (zone) {
@@ -246,7 +313,10 @@ export default function EventDetailScreen() {
       setZoneLng(String(zone.center_longitude));
       setZoneRadius(String(zone.initial_radius));
       setZoneName(zone.zone_name ?? '');
-      const currentRad = Math.round(zone.initial_radius * (1 - zone.narrowed_percent / 100));
+      const currentRad =
+        zone.current_radius != null
+          ? Math.round(zone.current_radius)
+          : Math.round(zone.initial_radius * (1 - zone.narrowed_percent / 100));
       setZoneCurrentRadiusMeters(String(currentRad));
     }
   }, [zoneQuery.data]);
@@ -255,6 +325,23 @@ export default function EventDetailScreen() {
   useEffect(() => {
     setBountyCode(eventQuery.data?.bounty_access_code ?? '');
   }, [eventQuery.data?.bounty_access_code]);
+
+  // --- Event winner query ---
+  // One row per event (unique constraint). Written by the declare-winner edge
+  // function (service role) when the bounty person scans a player's QR.
+  const winnerQuery = useQuery({
+    queryKey: ['eventWinner', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('event_winners')
+        .select('*')
+        .eq('event_id', id)
+        .maybeSingle();
+      if (error) throw error;
+      return data as EventWinner | null;
+    },
+    enabled: !!id,
+  });
 
   // --- Bounty location query + realtime ---
   const bountyLocationQuery = useQuery({
@@ -322,6 +409,16 @@ export default function EventDetailScreen() {
         () => {
           if (__DEV__) console.log('[EventDetail] bounty_locations change detected');
           void queryClient.invalidateQueries({ queryKey: ['bountyLocation', id] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'event_winners', filter: `event_id=eq.${id}` },
+        () => {
+          if (__DEV__) console.log('[EventDetail] event_winners change detected');
+          void queryClient.invalidateQueries({ queryKey: ['eventWinner', id] });
+          // A winner implies the event was marked completed — refresh it too.
+          void queryClient.invalidateQueries({ queryKey: ['event', id] });
         }
       )
       .subscribe();
@@ -660,6 +757,8 @@ export default function EventDetailScreen() {
   });
 
   // --- Zone mutations ---
+  // When the admin has an existing zone, we lock initial_radius to its stored
+  // value so "Reset to initial" always returns to the original zone size.
   const zoneUpsertMutation = useMutation({
     mutationFn: async () => {
       const lat = parseFloat(zoneLat);
@@ -671,8 +770,14 @@ export default function EventDetailScreen() {
       if (radius < ZONE_RADIUS_MIN) {
         throw new Error(`Radius must be at least ${ZONE_RADIUS_MIN} meters.`);
       }
+      if (radius > ZONE_RADIUS_MAX) {
+        throw new Error(`Radius must be at most ${ZONE_RADIUS_MAX} meters.`);
+      }
 
       if (__DEV__) console.log('[EventDetail] Upserting zone for event:', id);
+      // On initial creation, current_radius = initial_radius and narrowed_percent = 0.
+      // The player app reads current_radius first and only falls back to the
+      // narrowed formula when it's null.
       const { error } = await supabase
         .from('event_zones')
         .upsert({
@@ -681,7 +786,9 @@ export default function EventDetailScreen() {
           center_longitude: lng,
           initial_radius: radius,
           narrowed_percent: 0,
+          current_radius: radius,
           zone_name: zoneName.trim() || null,
+          updated_at: new Date().toISOString(),
         }, { onConflict: 'event_id' });
 
       if (error) throw error;
@@ -704,9 +811,10 @@ export default function EventDetailScreen() {
 
     zoneSaveTimer.current = setTimeout(async () => {
       try {
+        // Always bump updated_at so Supabase realtime emits the row change.
         const { error } = await supabase
           .from('event_zones')
-          .update(updates)
+          .update({ ...updates, updated_at: new Date().toISOString() })
           .eq('event_id', id);
 
         if (error) throw error;
@@ -720,14 +828,22 @@ export default function EventDetailScreen() {
     }, ZONE_DEBOUNCE_MS);
   }, [id, queryClient]);
 
+  // CRITICAL: Always write current_radius on every radius change. The player
+  // app reads current_radius first and only falls back to the narrowed formula
+  // (initial * (1 - narrowed/100)) when it's null — and that formula can only
+  // SHRINK from initial_radius. Without writing current_radius, the zone can
+  // never expand above 1000m.
   const handleCurrentRadiusChange = useCallback((value: string) => {
     const cleaned = value.replace(/[^0-9]/g, '');
     const ir = zoneQuery.data?.initial_radius ?? (parseInt(zoneRadius) || ZONE_RADIUS_DEFAULT);
     const meters = Math.max(0, parseInt(cleaned || '0', 10));
     const str = cleaned === '' ? '' : String(meters);
     setZoneCurrentRadiusMeters(str);
-    const narrowedPercent = ir > 0 ? Math.round((1 - meters / ir) * 100) : 0;
-    debouncedZoneUpdate({ narrowed_percent: narrowedPercent });
+    const narrowedPercent = deriveNarrowedPercent(meters, ir);
+    debouncedZoneUpdate({
+      current_radius: meters,
+      narrowed_percent: narrowedPercent,
+    });
   }, [debouncedZoneUpdate, zoneQuery.data?.initial_radius, zoneRadius]);
 
   const handleZoneCenterChange = useCallback((lat: number, lng: number) => {
@@ -738,7 +854,7 @@ export default function EventDetailScreen() {
 
   const handleZoneReset = useCallback(() => {
     const ir = zoneQuery.data?.initial_radius ?? (parseInt(zoneRadius) || ZONE_RADIUS_DEFAULT);
-    Alert.alert('Reset Zone', 'Reset the zone back to full size?', [
+    Alert.alert('Reset Zone', 'Reset the zone back to its initial radius?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Reset',
@@ -748,7 +864,11 @@ export default function EventDetailScreen() {
           void (async () => {
             const { error } = await supabase
               .from('event_zones')
-              .update({ narrowed_percent: 0 })
+              .update({
+                current_radius: ir,
+                narrowed_percent: 0,
+                updated_at: new Date().toISOString(),
+              })
               .eq('event_id', id);
             if (error) {
               if (__DEV__) console.error('[EventDetail] Zone reset failed:', error.message);
@@ -839,6 +959,10 @@ export default function EventDetailScreen() {
   const event = eventQuery.data;
   const zone = zoneQuery.data;
   const hasZone = zone !== null && zone !== undefined;
+  // Lock zone controls once an event has a winner / is completed, so the admin
+  // can't change the zone for a finished hunt.
+  const eventCompleted = event?.status === 'completed';
+  const winner = winnerQuery.data ?? null;
 
   const isRefreshing = eventQuery.isRefetching || cluesQuery.isRefetching || zoneQuery.isRefetching;
   const handleRefresh = useCallback(() => {
@@ -849,7 +973,13 @@ export default function EventDetailScreen() {
 
   // --- Computed zone values ---
   const initialRadius = hasZone ? (zone?.initial_radius ?? (parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT)) : ZONE_RADIUS_DEFAULT;
-  const currentRadius = hasZone ? (parseInt(zoneCurrentRadiusMeters) || 0) : null;
+  // Prefer the row's current_radius (the source of truth for the player app);
+  // fall back to the local text input.
+  const currentRadius = hasZone
+    ? (zone?.current_radius != null
+        ? Math.round(zone.current_radius)
+        : (parseInt(zoneCurrentRadiusMeters) || 0))
+    : null;
 
   if (eventQuery.isLoading) {
     return (
@@ -975,6 +1105,9 @@ export default function EventDetailScreen() {
           isLoading={bountyLocationQuery.isLoading}
           eventStatus={event.status}
         />
+
+        {/* Winner (auto-updates via realtime on event_winners) */}
+        <WinnerCard winner={winner} accent={accent} />
 
         {/* Status Control */}
         <Text style={detailStyles.sectionTitle}>STATUS CONTROL</Text>
@@ -1251,7 +1384,7 @@ export default function EventDetailScreen() {
                             latitude: zone?.center_latitude ?? 0,
                             longitude: zone?.center_longitude ?? 0,
                           }}
-                          draggable
+                          draggable={!eventCompleted}
                           onDragEnd={(e) => {
                             const { latitude, longitude } = e.nativeEvent.coordinate;
                             handleZoneCenterChange(latitude, longitude);
@@ -1294,7 +1427,7 @@ export default function EventDetailScreen() {
                   <View style={detailStyles.webCoordField}>
                     <Text style={detailStyles.zoneLabel}>LATITUDE</Text>
                     <TextInput
-                      style={detailStyles.input}
+                      style={[detailStyles.input, eventCompleted && { opacity: 0.5 }]}
                       value={zoneLat}
                       onChangeText={(v) => {
                         setZoneLat(v);
@@ -1304,12 +1437,13 @@ export default function EventDetailScreen() {
                       placeholder="e.g. 53.3498"
                       placeholderTextColor={Colors.textMuted}
                       keyboardType="decimal-pad"
+                      editable={!eventCompleted}
                     />
                   </View>
                   <View style={detailStyles.webCoordField}>
                     <Text style={detailStyles.zoneLabel}>LONGITUDE</Text>
                     <TextInput
-                      style={detailStyles.input}
+                      style={[detailStyles.input, eventCompleted && { opacity: 0.5 }]}
                       value={zoneLng}
                       onChangeText={(v) => {
                         setZoneLng(v);
@@ -1319,6 +1453,7 @@ export default function EventDetailScreen() {
                       placeholder="e.g. -6.2603"
                       placeholderTextColor={Colors.textMuted}
                       keyboardType="decimal-pad"
+                      editable={!eventCompleted}
                     />
                   </View>
                 </View>
@@ -1332,12 +1467,13 @@ export default function EventDetailScreen() {
                     style={detailStyles.narrowBtn}
                     onPress={() => {
                       const cur = parseInt(zoneCurrentRadiusMeters) || 0;
-                      const next = Math.max(0, cur - 50);
+                      const next = Math.max(ZONE_RADIUS_MIN, cur - ZONE_RADIUS_STEP);
                       handleCurrentRadiusChange(String(next));
                     }}
                     activeOpacity={0.7}
+                    disabled={eventCompleted}
                   >
-                    <Minus size={18} color={Colors.cyan} />
+                    <Minus size={18} color={eventCompleted ? Colors.textMuted : Colors.cyan} />
                   </TouchableOpacity>
                   <View style={detailStyles.narrowValueBox}>
                     <TextInput
@@ -1362,12 +1498,13 @@ export default function EventDetailScreen() {
                     style={detailStyles.narrowBtn}
                     onPress={() => {
                       const cur = parseInt(zoneCurrentRadiusMeters) || 0;
-                      const next = cur + 50;
+                      const next = Math.min(ZONE_RADIUS_MAX, cur + ZONE_RADIUS_STEP);
                       handleCurrentRadiusChange(String(next));
                     }}
                     activeOpacity={0.7}
+                    disabled={eventCompleted}
                   >
-                    <Plus size={18} color={Colors.cyan} />
+                    <Plus size={18} color={eventCompleted ? Colors.textMuted : Colors.cyan} />
                   </TouchableOpacity>
                 </View>
 
@@ -1654,6 +1791,62 @@ const detailStyles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: 'center',
+  },
+  winnerCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: `${Colors.amber}55`,
+    padding: 16,
+    gap: 12,
+  },
+  winnerHeaderRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+  },
+  winnerTitle: {
+    color: Colors.amber,
+    fontSize: 13,
+    fontWeight: '700' as const,
+    letterSpacing: 1.5,
+    flex: 1,
+  },
+  winnerBadge: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  winnerBadgeText: {
+    color: Colors.amber,
+    fontSize: 9,
+    fontWeight: '700' as const,
+    letterSpacing: 1,
+  },
+  winnerInfoGrid: {
+    gap: 10,
+  },
+  winnerInfoItem: {
+    gap: 3,
+  },
+  winnerInfoLabel: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    letterSpacing: 1,
+    fontWeight: '700' as const,
+  },
+  winnerInfoValue: {
+    fontSize: 13,
+    color: Colors.white,
+  },
+  winnerInfoValueMono: {
+    fontSize: 13,
+    color: Colors.white,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    letterSpacing: 0.5,
   },
   completedText: {
     color: Colors.grey,
@@ -1945,6 +2138,27 @@ const detailStyles = StyleSheet.create({
     fontSize: 14,
     color: Colors.textSecondary,
     fontWeight: '600' as const,
+  },
+  narrowRangeHint: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    letterSpacing: 0.3,
+    marginTop: 6,
+  },
+  zoneLockedNotice: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    backgroundColor: Colors.amberDim,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 8,
+  },
+  zoneLockedText: {
+    fontSize: 11,
+    color: Colors.amber,
+    lineHeight: 15,
   },
   narrowRadiusPreview: {
     fontSize: 12,

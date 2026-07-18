@@ -10,10 +10,10 @@ import {
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, MapPin, Calendar, Trophy, Ticket, LogOut, Crosshair } from 'lucide-react-native';
+import { Plus, MapPin, Calendar, Trophy, Ticket, LogOut, Crosshair, CheckCircle } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { Event, BountyLocation, DEFAULT_ACCENT_COLOR, getBountyStatus } from '@/types';
+import { Event, BountyLocation, EventWinner, DEFAULT_ACCENT_COLOR, getBountyStatus } from '@/types';
 import Colors from '@/constants/colors';
 
 function StatusBadge({ status, accent }: { status: string; accent: string }) {
@@ -62,6 +62,7 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { signOut } = useAuth();
   const [bountyMap, setBountyMap] = useState<Record<string, BountyLocation | null>>({});
+  const [winnerMap, setWinnerMap] = useState<Record<string, EventWinner | null>>({});
 
   const eventsQuery = useQuery({
     queryKey: ['events'],
@@ -148,6 +149,65 @@ export default function DashboardScreen() {
     };
   }, [liveEventIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fetch event_winners for completed events so we can show a winner badge.
+  const completedEventIds = (eventsQuery.data ?? []).filter((e) => e.status === 'completed').map((e) => e.id);
+  const completedEventIdsKey = completedEventIds.join(',');
+  useEffect(() => {
+    if (completedEventIds.length === 0) {
+      setWinnerMap({});
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const { data, error } = await supabase
+        .from('event_winners')
+        .select('*')
+        .in('event_id', completedEventIds);
+      if (error) {
+        if (__DEV__) console.warn('[Dashboard] event_winners fetch failed:', error.message);
+        return;
+      }
+      if (cancelled) return;
+      const map: Record<string, EventWinner | null> = {};
+      for (const id of completedEventIds) map[id] = null;
+      for (const row of data ?? []) {
+        map[(row as EventWinner).event_id] = row as EventWinner;
+      }
+      setWinnerMap(map);
+    };
+    void load();
+  }, [completedEventIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Realtime: refresh event_winners when any row changes.
+  useEffect(() => {
+    if (completedEventIds.length === 0) return;
+    const channel = supabase
+      .channel('dashboard-event-winners')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'event_winners' },
+        () => {
+          void supabase
+            .from('event_winners')
+            .select('*')
+            .in('event_id', completedEventIds)
+            .then(({ data }) => {
+              if (!data) return;
+              const map: Record<string, EventWinner | null> = {};
+              for (const id of completedEventIds) map[id] = null;
+              for (const row of data) {
+                map[(row as EventWinner).event_id] = row as EventWinner;
+              }
+              setWinnerMap(map);
+            });
+        }
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [completedEventIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const renderEvent = useCallback(({ item }: { item: Event }) => {
     const accent = item.accent_color ?? DEFAULT_ACCENT_COLOR;
     return (
@@ -182,6 +242,16 @@ export default function DashboardScreen() {
 
       {item.status === 'live' ? (
         <BountyBadge location={bountyMap[item.id]} />
+      ) : item.status === 'completed' && winnerMap[item.id] ? (
+        <View style={[styles.winnerBadgeRow]}>
+          <Trophy size={12} color={Colors.amber} />
+          <Text style={styles.winnerBadgeText} numberOfLines={1}>
+            WINNER DECLARED
+          </Text>
+          <View style={styles.winnerCheckBadge}>
+            <CheckCircle size={9} color={Colors.amber} />
+          </View>
+        </View>
       ) : (
         <View style={styles.bountyRowHint}>
           <Crosshair size={11} color={Colors.textMuted} />
@@ -192,7 +262,7 @@ export default function DashboardScreen() {
       )}
     </TouchableOpacity>
     );
-  }, [router, bountyMap]);
+  }, [router, bountyMap, winnerMap]);
 
   return (
     <>
@@ -347,6 +417,33 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textMuted,
     letterSpacing: 0.3,
+  },
+  winnerBadgeRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.cardBorder,
+    backgroundColor: Colors.amberDim,
+    marginHorizontal: -16,
+    marginBottom: -16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+  },
+  winnerBadgeText: {
+    fontSize: 11,
+    color: Colors.amber,
+    fontWeight: '700' as const,
+    letterSpacing: 1,
+    flex: 1,
+  },
+  winnerCheckBadge: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
   },
   fab: {
     position: 'absolute',

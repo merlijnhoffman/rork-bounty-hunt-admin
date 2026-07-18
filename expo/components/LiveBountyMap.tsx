@@ -59,8 +59,13 @@ export function LiveBountyMap({
   // Map region: prefer bounty location, fall back to zone center, then default.
   const lat = bountyLocation?.latitude ?? zone?.center_latitude ?? 53.3498;
   const lng = bountyLocation?.longitude ?? zone?.center_longitude ?? -6.2603;
-  const radius = zone?.initial_radius ?? ZONE_RADIUS_DEFAULT;
-  const delta = (radius / 111320) * 4;
+  // Use current_radius (the actual live radius) when present; only fall back to
+  // initial_radius when the column is null. This matches the player app's contract.
+  const zoneRadius =
+    zone?.current_radius != null
+      ? zone.current_radius
+      : zone?.initial_radius ?? ZONE_RADIUS_DEFAULT;
+  const delta = (zoneRadius / 111320) * 4;
 
   if (isLoading) {
     return (
@@ -122,14 +127,14 @@ export function LiveBountyMap({
               showsUserLocation={false}
               followsUserLocation={false}
             >
-              {/* Zone overlay */}
+              {/* Zone overlay — uses current_radius (the actual live radius) */}
               {zone && (
                 <Circle
                   center={{
                     latitude: zone.center_latitude,
                     longitude: zone.center_longitude,
                   }}
-                  radius={zone.initial_radius}
+                  radius={zone.current_radius != null ? zone.current_radius : zone.initial_radius}
                   strokeColor={`${accent}66`}
                   fillColor={`${accent}14`}
                   strokeWidth={1}

@@ -35,9 +35,47 @@ export interface EventZone {
   center_longitude: number;
   initial_radius: number;
   narrowed_percent: number;
+  /** Actual desired radius in meters. The player app uses this when present
+   *  and only falls back to initial_radius * (1 - narrowed_percent/100) when null.
+   *  Always set this on every zone update so the zone can expand above initial_radius. */
+  current_radius: number | null;
   zone_name: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** A declared winner for an event. One row per event (unique constraint).
+ *  Written by the declare-winner edge function (service role); admin reads only. */
+export interface EventWinner {
+  id: string;
+  event_id: string;
+  winner_user_id: string;
+  winner_email: string | null;
+  verification_code: string;
+  declared_at: string;
+  declare_distance_m: number | null;
+}
+
+/** Minimum/maximum radius the admin can set, in meters. */
+export const ZONE_RADIUS_MIN = 100;
+export const ZONE_RADIUS_MAX = 5000;
+export const ZONE_RADIUS_STEP = 50;
+
+/** Default initial radius for a new zone, in meters. */
+export const ZONE_INITIAL_RADIUS_DEFAULT = 1000;
+
+/**
+ * Derive narrowed_percent from current_radius and initial_radius.
+ * Returns 0 when expanding above initial (no narrowing). When shrinking,
+ * returns (1 - current/initial) * 100, clamped to [0, 100].
+ */
+export function deriveNarrowedPercent(currentRadius: number, initialRadius: number): number {
+  if (initialRadius <= 0) return 0;
+  const pct = (1 - currentRadius / initialRadius) * 100;
+  if (!Number.isFinite(pct)) return 0;
+  if (pct < 0) return 0;
+  if (pct > 100) return 100;
+  return Math.round(pct);
 }
 
 export interface Clue {
