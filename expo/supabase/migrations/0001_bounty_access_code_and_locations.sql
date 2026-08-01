@@ -7,7 +7,7 @@ ALTER TABLE events ADD COLUMN IF NOT EXISTS bounty_access_code TEXT;
 
 -- 2. Create bounty_locations table (stores the bounty's live GPS position)
 CREATE TABLE IF NOT EXISTS bounty_locations (
-  event_id TEXT PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+  event_id UUID PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
   latitude DOUBLE PRECISION NOT NULL,
   longitude DOUBLE PRECISION NOT NULL,
   accuracy DOUBLE PRECISION,

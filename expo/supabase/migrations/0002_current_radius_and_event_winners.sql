@@ -26,7 +26,7 @@ WHERE current_radius IS NULL;
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS event_winners (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   winner_user_id TEXT NOT NULL,
   winner_email TEXT,
   verification_code TEXT NOT NULL,
