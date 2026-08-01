@@ -1082,7 +1082,7 @@ export default function EventDetailScreen() {
           warnWhenLive
           isLive={event.status === 'live'}
         />
-        {event.status === 'scheduled' && bountyCode.trim() && (
+        {event.status === 'scheduled' && bountyCode.trim().length > 0 && (
           <TouchableOpacity
             style={[detailStyles.regenerateBtn, { borderColor: accent }]}
             onPress={regenerateBountyCode}
