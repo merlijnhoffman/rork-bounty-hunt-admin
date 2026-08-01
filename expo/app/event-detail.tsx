@@ -341,6 +341,7 @@ export default function EventDetailScreen() {
       return data as EventWinner | null;
     },
     enabled: !!id,
+    refetchInterval: 10000,
   });
 
   // --- Bounty location query + realtime ---
@@ -356,6 +357,7 @@ export default function EventDetailScreen() {
       return data as BountyLocation | null;
     },
     enabled: !!id,
+    refetchInterval: 5000,
   });
 
   // Re-render periodically so "signal lost" status updates as time passes.
