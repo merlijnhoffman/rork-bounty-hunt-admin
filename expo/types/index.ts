@@ -150,12 +150,12 @@ export interface BountyLocation {
 /** Computed bounty broadcast status used by the admin UI. */
 export type BountyStatus =
   | 'not_started'   // no row in bounty_locations yet
-  | 'broadcasting'  // is_active && updated_at within 5 min
-  | 'signal_lost'   // is_active && updated_at older than 5 min
+  | 'broadcasting'  // is_active && updated_at within 10 min
+  | 'signal_lost'   // is_active && updated_at older than 10 min
   | 'stopped';      // is_active === false
 
-/** Stale threshold for bounty signal-lost detection. */
-export const BOUNTY_STALE_MS = 5 * 60 * 1000;
+/** Stale threshold for bounty signal-lost detection — 10 minutes per the data contract. */
+export const BOUNTY_STALE_MS = 10 * 60 * 1000;
 
 /** Ambiguous characters removed from generated access codes. */
 const BOUNTY_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

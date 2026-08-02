@@ -54,7 +54,9 @@ export function LiveBountyMap({
 }) {
   const status = getBountyStatus(bountyLocation);
   const cfg = STATUS_CONFIG[status];
-  const isBroadcasting = status === 'broadcasting' || status === 'signal_lost';
+  // Only show the live marker when actively broadcasting (is_active && fresh).
+  // When signal_lost or stopped, hide the marker and show the offline state.
+  const isLive = status === 'broadcasting';
 
   // Map region: prefer bounty location, fall back to zone center, then default.
   const lat = bountyLocation?.latitude ?? zone?.center_latitude ?? 53.3498;
@@ -113,7 +115,7 @@ export function LiveBountyMap({
         <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label.toUpperCase()}</Text>
       </View>
 
-      {isBroadcasting && bountyLocation ? (
+      {isLive && bountyLocation ? (
         <>
           <View style={styles.mapContainer}>
             <MapView
@@ -193,9 +195,13 @@ export function LiveBountyMap({
           <Radio size={28} color={cfg.color} />
           <Text style={[styles.placeholderText, { color: cfg.color }]}>{cfg.label}</Text>
           <Text style={styles.placeholderHint}>
-            {eventStatus === 'live'
-              ? 'The bounty person has not started broadcasting yet. They need to enter the access code in their app.'
-              : 'Tracking activates once the event is live and the bounty person starts broadcasting.'}
+            {status === 'signal_lost'
+              ? 'Bounty signal is stale (last update was more than 10 minutes ago). Check the bounty person\'s device and connection.'
+              : status === 'stopped'
+                ? 'The bounty person has stopped broadcasting.'
+                : eventStatus === 'live'
+                  ? 'The bounty person has not started broadcasting yet. They need to enter the access code in their app.'
+                  : 'Tracking activates once the event is live and the bounty person starts broadcasting.'}
           </Text>
         </View>
       )}

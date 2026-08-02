@@ -345,18 +345,22 @@ export default function EventDetailScreen() {
   });
 
   // --- Bounty location query + realtime ---
+  // Polls every 5s as a fallback in case realtime WebSocket doesn't fire.
+  // staleTime: 2s so the data is considered fresh briefly but refetched promptly.
   const bountyLocationQuery = useQuery({
     queryKey: ['bountyLocation', id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('bounty_locations')
-        .select('*')
+        .select('event_id, latitude, longitude, accuracy, heading, speed, is_active, updated_at')
         .eq('event_id', id)
         .maybeSingle();
       if (error) throw error;
+      if (__DEV__) console.log('[EventDetail] bounty_locations query result:', data ? `lat=${(data as BountyLocation).latitude} is_active=${(data as BountyLocation).is_active} updated_at=${(data as BountyLocation).updated_at}` : 'null');
       return data as BountyLocation | null;
     },
     enabled: !!id,
+    staleTime: 2000,
     refetchInterval: 5000,
   });
 
