@@ -728,6 +728,8 @@ export default function EventDetailScreen() {
   });
 
   // --- Reset hunt mutation ---
+  // Resets the event to 'scheduled' AND deletes the zone, bounty location,
+  // and winner so the organizer can start completely fresh with a new zone.
   const resetMutation = useMutation({
     mutationFn: async () => {
       const session = await supabase.auth.getSession();
@@ -754,10 +756,39 @@ export default function EventDetailScreen() {
         const resBody = await res.text();
         if (!res.ok) throw new Error(`Reset failed (${res.status}): ${resBody}`);
       }
+
+      // Delete the zone so the organizer can create a fresh one with a new name.
+      const zoneErr = await supabase
+        .from('event_zones')
+        .delete()
+        .eq('event_id', id);
+      if (zoneErr.error) {
+        if (__DEV__) console.warn('[EventDetail] Could not delete zone on reset:', zoneErr.error.message);
+      }
+
+      // Clean up bounty location and winner for a truly fresh start.
+      const bountyErr = await supabase
+        .from('bounty_locations')
+        .delete()
+        .eq('event_id', id);
+      if (bountyErr.error) {
+        if (__DEV__) console.warn('[EventDetail] Could not delete bounty_location on reset:', bountyErr.error.message);
+      }
+
+      const winnerErr = await supabase
+        .from('event_winners')
+        .delete()
+        .eq('event_id', id);
+      if (winnerErr.error) {
+        if (__DEV__) console.warn('[EventDetail] Could not delete event_winner on reset:', winnerErr.error.message);
+      }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['event', id] });
       void queryClient.invalidateQueries({ queryKey: ['events'] });
+      void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
+      void queryClient.invalidateQueries({ queryKey: ['bountyLocation', id] });
+      void queryClient.invalidateQueries({ queryKey: ['eventWinner', id] });
     },
     onError: (error: Error) => {
       Alert.alert('Error', error.message);
@@ -907,10 +938,14 @@ export default function EventDetailScreen() {
   }, [statusMutation]);
 
   const handleResetHunt = useCallback(() => {
-    Alert.alert('Reset Hunt', 'Reset this hunt back to scheduled?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Reset', style: 'destructive', onPress: () => resetMutation.mutate() },
-    ]);
+    Alert.alert(
+      'Reset Hunt',
+      'This will reset the hunt to scheduled and DELETE the zone, bounty location, and winner. You can then set up a fresh zone with a new name. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reset & Clear Zone', style: 'destructive', onPress: () => resetMutation.mutate() },
+      ],
+    );
   }, [resetMutation]);
 
   const handleDeleteClue = useCallback((clueId: string) => {
@@ -961,6 +996,44 @@ export default function EventDetailScreen() {
       ],
     );
   }, [eventQuery.data, persistBountyCode]);
+
+  // --- Delete zone mutation ---
+  // Deletes the event_zones row so the organizer can create a fresh zone
+  // with a new name, center, and radius.
+  const deleteZoneMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from('event_zones')
+        .delete()
+        .eq('event_id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      // Reset local zone state so the initial setup form shows fresh.
+      setZoneLat('');
+      setZoneLng('');
+      setZoneRadius(String(ZONE_RADIUS_DEFAULT));
+      setZoneName('');
+      setZoneCurrentRadiusMeters('');
+      setZoneSyncStatus('idle');
+      setZoneMapVisible(false);
+      void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
+    },
+    onError: (error: Error) => {
+      Alert.alert('Error', error.message);
+    },
+  });
+
+  const handleDeleteZone = useCallback(() => {
+    Alert.alert(
+      'Delete Zone',
+      'This will permanently delete the current zone. You can then create a fresh one with a new name, center, and radius. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete Zone', style: 'destructive', onPress: () => deleteZoneMutation.mutate() },
+      ],
+    );
+  }, [deleteZoneMutation]);
 
   const canSendClue = clueText.trim().length > 0 || mediaAttachment !== null;
 
@@ -1737,6 +1810,21 @@ export default function EventDetailScreen() {
                     RESET ZONE
                   </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={detailStyles.zoneDeleteBtn}
+                  onPress={handleDeleteZone}
+                  activeOpacity={0.7}
+                  disabled={deleteZoneMutation.isPending}
+                >
+                  {deleteZoneMutation.isPending ? (
+                    <ActivityIndicator size="small" color={Colors.red} />
+                  ) : (
+                    <>
+                      <Trash2 size={14} color={Colors.red} />
+                      <Text style={detailStyles.zoneDeleteBtnText}>DELETE ZONE</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
               </View>
 
               {/* Updated timestamp */}
@@ -2455,6 +2543,23 @@ const detailStyles = StyleSheet.create({
   },
   zoneResetBtnText: {
     color: Colors.amber,
+    fontSize: 12,
+    fontWeight: '700' as const,
+    letterSpacing: 1,
+  },
+  zoneDeleteBtn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: Colors.red,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  zoneDeleteBtnText: {
+    color: Colors.red,
     fontSize: 12,
     fontWeight: '700' as const,
     letterSpacing: 1,
