@@ -143,7 +143,23 @@ export function LiveBountyMap({
                 />
               )}
 
-              {/* Bounty marker */}
+              {/* Zone center marker (distinct from bounty) */}
+              {zone && (
+                <Marker
+                  coordinate={{
+                    latitude: zone.center_latitude,
+                    longitude: zone.center_longitude,
+                  }}
+                  tracksViewChanges={false}
+                >
+                  <View style={styles.zoneCenterMarker}>
+                    <View style={styles.zoneCenterCross1} />
+                    <View style={styles.zoneCenterCross2} />
+                  </View>
+                </Marker>
+              )}
+
+              {/* Bounty marker (live position — distinct from zone center) */}
               <Marker
                 coordinate={{
                   latitude: bountyLocation.latitude,
@@ -253,6 +269,26 @@ const styles = StyleSheet.create({
   },
   map: {
     ...StyleSheet.absoluteFillObject,
+  },
+  zoneCenterMarker: {
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  zoneCenterCross1: {
+    position: 'absolute',
+    width: 16,
+    height: 2,
+    backgroundColor: 'rgba(0, 212, 255, 0.5)',
+    borderRadius: 1,
+  },
+  zoneCenterCross2: {
+    position: 'absolute',
+    width: 2,
+    height: 16,
+    backgroundColor: 'rgba(0, 212, 255, 0.5)',
+    borderRadius: 1,
   },
   bountyMarker: {
     width: 22,

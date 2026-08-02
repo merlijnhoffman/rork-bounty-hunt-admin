@@ -997,9 +997,14 @@ export default function EventDetailScreen() {
       const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
       const fnUrl = `${supabaseUrl}/functions/v1/update-bounty-location`;
 
-      // Use the zone center as the test location, or a default.
-      const testLat = zone?.center_latitude ?? 53.3498;
-      const testLng = zone?.center_longitude ?? -6.2603;
+      // Use a location OFFSET from the zone center so the test ping is
+      // visually distinct from the zone center marker on the map. This
+      // prevents the test ping from making it look like the bounty is at
+      // the zone center. Offset by ~100m to the NE.
+      const baseLat = zone?.center_latitude ?? 53.3498;
+      const baseLng = zone?.center_longitude ?? -6.2603;
+      const testLat = baseLat + 0.001;  // ~111m north
+      const testLng = baseLng + 0.001;  // ~111m east (approx, varies by latitude)
 
       if (__DEV__) console.log('[EventDetail] Test ping to edge function:', fnUrl, 'code:', code);
 
@@ -1025,7 +1030,7 @@ export default function EventDetailScreen() {
       if (res.ok) {
         setTestPingResult({
           ok: true,
-          message: `Edge function responded OK (${res.status}). Location updated. The bounty_locations row should refresh within 5s.`,
+          message: `Edge function responded OK (${res.status}). A TEST location (offset ~140m NE from zone center) was written. This OVERWRITES the bounty's real location until the bounty device sends its next update. The bounty map should refresh within 5s.`,
         });
         // Invalidate to refetch immediately
         void queryClient.invalidateQueries({ queryKey: ['bountyLocation', id] });
@@ -1197,6 +1202,38 @@ export default function EventDetailScreen() {
           {/* Raw data display */}
           <View style={detailStyles.diagGrid}>
             <View style={detailStyles.diagItem}>
+              <Text style={detailStyles.diagLabel}>BOUNTY LAT/LNG</Text>
+              <Text style={detailStyles.diagValueMono} numberOfLines={1}>
+                {bountyLocationQuery.data
+                  ? `${bountyLocationQuery.data.latitude.toFixed(6)}, ${bountyLocationQuery.data.longitude.toFixed(6)}`
+                  : 'No row in bounty_locations'}
+              </Text>
+            </View>
+            <View style={detailStyles.diagItem}>
+              <Text style={detailStyles.diagLabel}>ZONE CENTER</Text>
+              <Text style={detailStyles.diagValueMono} numberOfLines={1}>
+                {zone
+                  ? `${zone.center_latitude.toFixed(6)}, ${zone.center_longitude.toFixed(6)}`
+                  : 'No zone set'}
+              </Text>
+            </View>
+            <View style={detailStyles.diagItem}>
+              <Text style={detailStyles.diagLabel}>SAME AS ZONE?</Text>
+              <Text style={[detailStyles.diagValue, {
+                color: bountyLocationQuery.data && zone &&
+                  Math.abs(bountyLocationQuery.data.latitude - zone.center_latitude) < 0.00001 &&
+                  Math.abs(bountyLocationQuery.data.longitude - zone.center_longitude) < 0.00001
+                  ? Colors.amber : Colors.cyan
+              }]}>
+                {bountyLocationQuery.data && zone
+                  ? (Math.abs(bountyLocationQuery.data.latitude - zone.center_latitude) < 0.00001 &&
+                     Math.abs(bountyLocationQuery.data.longitude - zone.center_longitude) < 0.00001
+                    ? 'YES — likely a test ping, not real device'
+                    : 'NO — location differs from zone center')
+                  : '—'}
+              </Text>
+            </View>
+            <View style={detailStyles.diagItem}>
               <Text style={detailStyles.diagLabel}>LAST UPDATE</Text>
               <Text style={detailStyles.diagValue}>
                 {bountyLocationQuery.data?.updated_at
@@ -1273,9 +1310,10 @@ export default function EventDetailScreen() {
 
           {/* Help text */}
           <Text style={detailStyles.diagHelp}>
-            The admin app polls bounty_locations every 5s. If the last update is stale, the bounty
-            person's device is not successfully calling the edge function. Use the test ping to verify
-            the edge function is deployed and the access code is valid.
+            The admin app polls bounty_locations every 5s. If the bounty position matches the zone
+            center exactly, it was likely set by a test ping — the bounty device is not updating.
+            Check that the player app has the correct access code and is actively broadcasting.
+            The test ping overwrites real bounty data with a test location offset from the zone center.
           </Text>
         </View>
 
