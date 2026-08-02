@@ -42,6 +42,8 @@ import {
   RefreshCw,
   Radio,
   Trophy,
+  Zap,
+  AlertTriangle,
 } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import {
@@ -977,6 +979,79 @@ export default function EventDetailScreen() {
     void zoneQuery.refetch();
   }, [eventQuery, cluesQuery, zoneQuery]);
 
+  // --- Test ping: call the edge function directly to verify it's deployed ---
+  const [testPingResult, setTestPingResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testPingLoading, setTestPingLoading] = useState(false);
+
+  const handleTestPing = useCallback(async () => {
+    if (!event || !id) return;
+    const code = event.bounty_access_code;
+    if (!code) {
+      setTestPingResult({ ok: false, message: 'No access code set on this event. Set one first.' });
+      return;
+    }
+    setTestPingLoading(true);
+    setTestPingResult(null);
+    try {
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+      const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+      const fnUrl = `${supabaseUrl}/functions/v1/update-bounty-location`;
+
+      // Use the zone center as the test location, or a default.
+      const testLat = zone?.center_latitude ?? 53.3498;
+      const testLng = zone?.center_longitude ?? -6.2603;
+
+      if (__DEV__) console.log('[EventDetail] Test ping to edge function:', fnUrl, 'code:', code);
+
+      const res = await fetch(fnUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({
+          accessCode: code,
+          eventId: id,
+          latitude: testLat,
+          longitude: testLng,
+          accuracy: 10,
+        }),
+      });
+
+      const bodyText = await res.text();
+      if (__DEV__) console.log('[EventDetail] Test ping response:', res.status, bodyText);
+
+      if (res.ok) {
+        setTestPingResult({
+          ok: true,
+          message: `Edge function responded OK (${res.status}). Location updated. The bounty_locations row should refresh within 5s.`,
+        });
+        // Invalidate to refetch immediately
+        void queryClient.invalidateQueries({ queryKey: ['bountyLocation', id] });
+      } else {
+        let errorMsg = bodyText;
+        try {
+          const parsed = JSON.parse(bodyText);
+          errorMsg = parsed.error ?? bodyText;
+        } catch { /* keep raw text */ }
+        setTestPingResult({
+          ok: false,
+          message: `Edge function returned ${res.status}: ${errorMsg}`,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (__DEV__) console.error('[EventDetail] Test ping failed:', msg);
+      setTestPingResult({
+        ok: false,
+        message: `Network error: ${msg}. The edge function may not be deployed. Run: supabase functions deploy update-bounty-location --no-verify-jwt`,
+      });
+    } finally {
+      setTestPingLoading(false);
+    }
+  }, [event, id, zone, queryClient]);
+
   // --- Computed zone values ---
   const initialRadius = hasZone ? (zone?.initial_radius ?? (parseFloat(zoneRadius) || ZONE_RADIUS_DEFAULT)) : ZONE_RADIUS_DEFAULT;
   // Prefer the row's current_radius (the source of truth for the player app);
@@ -1111,6 +1186,98 @@ export default function EventDetailScreen() {
           isLoading={bountyLocationQuery.isLoading}
           eventStatus={event.status}
         />
+
+        {/* Bounty Diagnostics */}
+        <View style={detailStyles.diagCard}>
+          <View style={detailStyles.diagHeader}>
+            <Zap size={14} color={Colors.cyan} />
+            <Text style={detailStyles.diagTitle}>BOUNTY DIAGNOSTICS</Text>
+          </View>
+
+          {/* Raw data display */}
+          <View style={detailStyles.diagGrid}>
+            <View style={detailStyles.diagItem}>
+              <Text style={detailStyles.diagLabel}>LAST UPDATE</Text>
+              <Text style={detailStyles.diagValue}>
+                {bountyLocationQuery.data?.updated_at
+                  ? new Date(bountyLocationQuery.data.updated_at).toLocaleString()
+                  : 'No row in bounty_locations'}
+              </Text>
+            </View>
+            <View style={detailStyles.diagItem}>
+              <Text style={detailStyles.diagLabel}>AGE</Text>
+              <Text style={detailStyles.diagValue}>
+                {bountyLocationQuery.data?.updated_at
+                  ? `${Math.round((Date.now() - new Date(bountyLocationQuery.data.updated_at).getTime()) / 1000)}s (${Math.round((Date.now() - new Date(bountyLocationQuery.data.updated_at).getTime()) / 60000)}m)`
+                  : '—'}
+              </Text>
+            </View>
+            <View style={detailStyles.diagItem}>
+              <Text style={detailStyles.diagLabel}>IS_ACTIVE</Text>
+              <Text style={detailStyles.diagValue}>
+                {bountyLocationQuery.data ? String(bountyLocationQuery.data.is_active) : '—'}
+              </Text>
+            </View>
+            <View style={detailStyles.diagItem}>
+              <Text style={detailStyles.diagLabel}>ACCESS CODE</Text>
+              <Text style={detailStyles.diagValueMono} numberOfLines={1}>
+                {event.bounty_access_code ?? 'NOT SET'}
+              </Text>
+            </View>
+            <View style={detailStyles.diagItem}>
+              <Text style={detailStyles.diagLabel}>EVENT ID</Text>
+              <Text style={detailStyles.diagValueMono} numberOfLines={1}>
+                {id}
+              </Text>
+            </View>
+            <View style={detailStyles.diagItem}>
+              <Text style={detailStyles.diagLabel}>POLL STATUS</Text>
+              <Text style={detailStyles.diagValue}>
+                {bountyLocationQuery.isError ? `ERROR: ${(bountyLocationQuery.error as Error)?.message}` : 'OK (polling every 5s)'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Test ping button */}
+          <TouchableOpacity
+            style={detailStyles.diagPingBtn}
+            onPress={handleTestPing}
+            disabled={testPingLoading}
+            activeOpacity={0.7}
+          >
+            {testPingLoading ? (
+              <ActivityIndicator color={Colors.bg} size="small" />
+            ) : (
+              <>
+                <Zap size={14} color={Colors.bg} fill={Colors.bg} />
+                <Text style={detailStyles.diagPingBtnText}>SEND TEST PING TO EDGE FUNCTION</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {testPingResult && (
+            <View style={[detailStyles.diagResultBox, !testPingResult.ok && detailStyles.diagResultBoxErr]}>
+              <View style={detailStyles.diagResultHeader}>
+                {testPingResult.ok ? (
+                  <CheckCircle size={12} color={Colors.cyan} />
+                ) : (
+                  <AlertTriangle size={12} color={Colors.amber} />
+                )}
+                <Text style={[detailStyles.diagResultTitle, { color: testPingResult.ok ? Colors.cyan : Colors.amber }]}>
+                  {testPingResult.ok ? 'SUCCESS' : 'FAILED'}
+                </Text>
+              </View>
+              <Text style={detailStyles.diagResultMsg}>{testPingResult.message}</Text>
+            </View>
+          )}
+
+          {/* Help text */}
+          <Text style={detailStyles.diagHelp}>
+            The admin app polls bounty_locations every 5s. If the last update is stale, the bounty
+            person's device is not successfully calling the edge function. Use the test ping to verify
+            the edge function is deployed and the access code is valid.
+          </Text>
+        </View>
 
         {/* Winner (auto-updates via realtime on event_winners) */}
         <WinnerCard winner={winner} accent={accent} />
@@ -2259,6 +2426,99 @@ const detailStyles = StyleSheet.create({
     color: Colors.textMuted,
     textAlign: 'center',
     marginTop: 2,
+  },
+  // --- Bounty Diagnostics ---
+  diagCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    padding: 14,
+    gap: 12,
+  },
+  diagHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+  },
+  diagTitle: {
+    fontSize: 11,
+    color: Colors.cyan,
+    letterSpacing: 1.5,
+    fontWeight: '700' as const,
+  },
+  diagGrid: {
+    gap: 8,
+  },
+  diagItem: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+  },
+  diagLabel: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    letterSpacing: 1,
+    fontWeight: '700' as const,
+    flexShrink: 0,
+  },
+  diagValue: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    textAlign: 'right' as const,
+    flex: 1,
+  },
+  diagValueMono: {
+    fontSize: 10,
+    color: Colors.textSecondary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    textAlign: 'right' as const,
+    flex: 1,
+  },
+  diagPingBtn: {
+    backgroundColor: Colors.cyan,
+    borderRadius: 10,
+    paddingVertical: 12,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 8,
+  },
+  diagPingBtnText: {
+    color: Colors.bg,
+    fontSize: 11,
+    fontWeight: '700' as const,
+    letterSpacing: 1,
+  },
+  diagResultBox: {
+    backgroundColor: Colors.cyanDim,
+    borderRadius: 8,
+    padding: 10,
+    gap: 6,
+  },
+  diagResultBoxErr: {
+    backgroundColor: Colors.amberDim,
+  },
+  diagResultHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+  },
+  diagResultTitle: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    letterSpacing: 1,
+  },
+  diagResultMsg: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    lineHeight: 16,
+  },
+  diagHelp: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    lineHeight: 15,
   },
   // --- Clue History ---
   clueList: {
