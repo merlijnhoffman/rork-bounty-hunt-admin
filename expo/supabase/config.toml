@@ -1,0 +1,7 @@
+project_id = "bounty-hunt"
+
+[functions.update-bounty-location]
+verify_jwt = false
+
+[functions.verify-connection]
+verify_jwt = false
