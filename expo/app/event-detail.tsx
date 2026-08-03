@@ -703,6 +703,37 @@ export default function EventDetailScreen() {
       } else {
         if (__DEV__) console.log('[EventDetail] Clue inserted successfully:', data);
       }
+
+      // --- Send push notification to all ticket holders ---
+      // Fire-and-forget: push failures should not block clue delivery.
+      // The send-push edge function is already deployed and handles fan-out
+      // to all push token subscribers for this event.
+      try {
+        const pushUrl = `${process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''}/functions/v1/send-push`;
+        const pushKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+        if (__DEV__) console.log('[EventDetail] Sending push notification for new clue, event:', id);
+        const pushRes = await fetch(pushUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': pushKey,
+            'Authorization': `Bearer ${pushKey}`,
+          },
+          body: JSON.stringify({
+            type: 'new_clue',
+            eventId: id,
+            clueText: clueText.trim(),
+          }),
+        });
+        if (!pushRes.ok) {
+          if (__DEV__) console.warn('[EventDetail] send-push returned non-OK:', pushRes.status, await pushRes.text());
+        } else {
+          if (__DEV__) console.log('[EventDetail] Push notification sent successfully');
+        }
+      } catch (pushErr) {
+        const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+        if (__DEV__) console.warn('[EventDetail] Push notification failed (non-blocking):', pushMsg);
+      }
     },
     onSuccess: () => {
       setClueText('');
