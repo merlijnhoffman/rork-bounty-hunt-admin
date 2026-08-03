@@ -172,10 +172,17 @@ function MediaPreview({ attachment, onRemove }: { attachment: MediaAttachment; o
 function ClueMediaDisplay({ clue }: { clue: Clue }) {
   if (!clue.media_url || !clue.media_type) return null;
 
+  // Construct the public URL from the storage path. The player app does the
+  // same: supabase.storage.from('clue-media').getPublicUrl(mediaUrl).
+  // Older clues may store full URLs (http...) — use as-is in that case.
+  const mediaSrc = clue.media_url.startsWith('http')
+    ? clue.media_url
+    : supabase.storage.from('clue-media').getPublicUrl(clue.media_url).data.publicUrl;
+
   if (clue.media_type === 'image') {
     return (
       <Image
-        source={{ uri: clue.media_url }}
+        source={{ uri: mediaSrc }}
         style={detailStyles.clueMediaImage}
         resizeMode="cover"
       />
@@ -217,14 +224,13 @@ async function uploadMediaToSupabase(attachment: MediaAttachment, eventId: strin
     throw new Error(`Media upload failed: ${error.message}`);
   }
 
-  if (__DEV__) console.log('[Upload] Upload success:', data.path);
+  if (__DEV__) console.log('[Upload] Upload success, storage path:', data.path);
 
-  const { data: urlData } = supabase.storage
-    .from('clue-media')
-    .getPublicUrl(data.path);
-
-  if (__DEV__) console.log('[Upload] Public URL:', urlData.publicUrl);
-  return urlData.publicUrl;
+  // Store the STORAGE PATH (not the full URL) so the player app can construct
+  // the public URL via supabase.storage.from('clue-media').getPublicUrl(path).
+  // The player app also handles full URLs (checks for 'http' prefix) for
+  // backward compatibility with older clues.
+  return data.path;
 }
 
 export default function EventDetailScreen() {
@@ -728,8 +734,13 @@ export default function EventDetailScreen() {
   });
 
   // --- Reset hunt mutation ---
-  // Resets the event to 'scheduled' AND deletes the zone, bounty location,
-  // and winner so the organizer can start completely fresh with a new zone.
+  // Resets the event to 'scheduled' AND deletes ALL event-specific server-side
+  // data so the organizer can start completely fresh:
+  //   - clues, event_winners, player_connections, bounty_locations,
+  //     connection_codes are all deleted
+  //   - event_zones row is deleted (so a fresh zone with a new name can be created)
+  // The player app detects the status change from 'completed' → other and
+  // clears its local state, but the server-side rows must be deleted here.
   const resetMutation = useMutation({
     mutationFn: async () => {
       const session = await supabase.auth.getSession();
@@ -757,6 +768,26 @@ export default function EventDetailScreen() {
         if (!res.ok) throw new Error(`Reset failed (${res.status}): ${resBody}`);
       }
 
+      // Delete all event-specific data in order. Errors are logged but non-fatal
+      // (some tables may not exist yet or may have no rows for this event).
+      const tablesToDelete = [
+        'clues',
+        'event_winners',
+        'player_connections',
+        'bounty_locations',
+        'connection_codes',
+      ] as const;
+
+      for (const table of tablesToDelete) {
+        const { error: delErr } = await supabase
+          .from(table)
+          .delete()
+          .eq('event_id', id);
+        if (delErr) {
+          if (__DEV__) console.warn(`[EventDetail] Could not delete ${table} on reset:`, delErr.message);
+        }
+      }
+
       // Delete the zone so the organizer can create a fresh one with a new name.
       const zoneErr = await supabase
         .from('event_zones')
@@ -765,23 +796,6 @@ export default function EventDetailScreen() {
       if (zoneErr.error) {
         if (__DEV__) console.warn('[EventDetail] Could not delete zone on reset:', zoneErr.error.message);
       }
-
-      // Clean up bounty location and winner for a truly fresh start.
-      const bountyErr = await supabase
-        .from('bounty_locations')
-        .delete()
-        .eq('event_id', id);
-      if (bountyErr.error) {
-        if (__DEV__) console.warn('[EventDetail] Could not delete bounty_location on reset:', bountyErr.error.message);
-      }
-
-      const winnerErr = await supabase
-        .from('event_winners')
-        .delete()
-        .eq('event_id', id);
-      if (winnerErr.error) {
-        if (__DEV__) console.warn('[EventDetail] Could not delete event_winner on reset:', winnerErr.error.message);
-      }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['event', id] });
@@ -789,6 +803,7 @@ export default function EventDetailScreen() {
       void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
       void queryClient.invalidateQueries({ queryKey: ['bountyLocation', id] });
       void queryClient.invalidateQueries({ queryKey: ['eventWinner', id] });
+      void queryClient.invalidateQueries({ queryKey: ['clues', id] });
     },
     onError: (error: Error) => {
       Alert.alert('Error', error.message);
