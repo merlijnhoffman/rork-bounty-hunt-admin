@@ -765,20 +765,52 @@ export default function EventDetailScreen() {
   });
 
   // --- Reset hunt mutation ---
-  // Resets the event to 'scheduled' AND deletes ALL event-specific server-side
-  // data so the organizer can start completely fresh:
-  //   - clues, event_winners, player_connections, bounty_locations,
-  //     connection_codes are all deleted
-  //   - event_zones row is deleted (so a fresh zone with a new name can be created)
-  // The player app detects the status change from 'completed' → other and
-  // clears its local state, but the server-side rows must be deleted here.
+  // Full reset: wipes all per-event gameplay data (clues, event_winners,
+  // player_connections, bounty_locations, hunter_locations, connection_codes)
+  // and sets the event back to 'scheduled' with a fresh updated_at so the
+  // player app discards each hunter's saved stats (hint tokens, unlocked
+  // hints, distance meter). event_zones is left untouched — the organizer
+  // redraws the zone manually.
+  // Delete failures (e.g. RLS) are non-fatal: the reset continues and any
+  // tables that could not be cleared are reported in the result alert.
   const resetMutation = useMutation({
     mutationFn: async () => {
       const session = await supabase.auth.getSession();
       const accessToken = session.data.session?.access_token;
+
+      // Wipe gameplay data first. If a delete fails (e.g. RLS blocks it),
+      // continue with the remaining tables and report failures at the end.
+      const tablesToClear = [
+        'clues',
+        'event_winners',
+        'player_connections',
+        'bounty_locations',
+        'hunter_locations',
+        'connection_codes',
+      ] as const;
+
+      const failedTables: string[] = [];
+      for (const table of tablesToClear) {
+        const { error: delErr } = await supabase
+          .from(table)
+          .delete()
+          .eq('event_id', id);
+        if (delErr) {
+          if (__DEV__) console.warn(`[EventDetail] Could not clear ${table} on reset:`, delErr.message);
+          failedTables.push(table);
+        }
+      }
+
+      // updated_at bump is critical: the player app watches it to discard
+      // each hunter's saved stats (hint tokens, unlocked hints, distance meter).
+      const eventUpdate = {
+        status: 'scheduled' as const,
+        updated_at: new Date().toISOString(),
+      };
+
       const { data, error } = await supabase
         .from('events')
-        .update({ status: 'scheduled' })
+        .update(eventUpdate)
         .eq('id', id)
         .select();
       if (error) throw new Error(error.message);
@@ -793,48 +825,30 @@ export default function EventDetailScreen() {
         if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
         const res = await fetch(
           `${supabaseUrl}/rest/v1/events?id=eq.${id}`,
-          { method: 'PATCH', headers, body: JSON.stringify({ status: 'scheduled' }) }
+          { method: 'PATCH', headers, body: JSON.stringify(eventUpdate) }
         );
         const resBody = await res.text();
         if (!res.ok) throw new Error(`Reset failed (${res.status}): ${resBody}`);
       }
 
-      // Delete all event-specific data in order. Errors are logged but non-fatal
-      // (some tables may not exist yet or may have no rows for this event).
-      const tablesToDelete = [
-        'clues',
-        'event_winners',
-        'player_connections',
-        'bounty_locations',
-        'connection_codes',
-      ] as const;
-
-      for (const table of tablesToDelete) {
-        const { error: delErr } = await supabase
-          .from(table)
-          .delete()
-          .eq('event_id', id);
-        if (delErr) {
-          if (__DEV__) console.warn(`[EventDetail] Could not delete ${table} on reset:`, delErr.message);
-        }
-      }
-
-      // Delete the zone so the organizer can create a fresh one with a new name.
-      const zoneErr = await supabase
-        .from('event_zones')
-        .delete()
-        .eq('event_id', id);
-      if (zoneErr.error) {
-        if (__DEV__) console.warn('[EventDetail] Could not delete zone on reset:', zoneErr.error.message);
-      }
+      return { failedTables };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ['event', id] });
       void queryClient.invalidateQueries({ queryKey: ['events'] });
-      void queryClient.invalidateQueries({ queryKey: ['eventZone', id] });
       void queryClient.invalidateQueries({ queryKey: ['bountyLocation', id] });
       void queryClient.invalidateQueries({ queryKey: ['eventWinner', id] });
       void queryClient.invalidateQueries({ queryKey: ['clues', id] });
+
+      const failed = result?.failedTables ?? [];
+      if (failed.length > 0) {
+        Alert.alert(
+          'Hunt reset',
+          `The hunt was reset, but these tables could not be cleared: ${failed.join(', ')}. Remove them via the Supabase dashboard if needed.`,
+        );
+      } else {
+        Alert.alert('Hunt reset', 'All gameplay data was cleared and the hunt is back to scheduled.');
+      }
     },
     onError: (error: Error) => {
       Alert.alert('Error', error.message);
@@ -986,10 +1000,10 @@ export default function EventDetailScreen() {
   const handleResetHunt = useCallback(() => {
     Alert.alert(
       'Reset Hunt',
-      'This will reset the hunt to scheduled and DELETE the zone, bounty location, and winner. You can then set up a fresh zone with a new name. Continue?',
+      'This will reset the hunt to scheduled and DELETE all gameplay data (clues, winner, bounty location, connections). The zone stays so you can redraw it yourself. Continue?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Reset & Clear Zone', style: 'destructive', onPress: () => resetMutation.mutate() },
+        { text: 'Reset Hunt', style: 'destructive', onPress: () => resetMutation.mutate() },
       ],
     );
   }, [resetMutation]);
