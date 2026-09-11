@@ -2,6 +2,8 @@ export interface Event {
   id: string;
   title: string | null;
   city: string;
+  /** ISO 3166-1 alpha-2 country code (e.g. "NL"). Null = not set. Added by migration 0006. */
+  country: string | null;
   date: string;
   start_time: string;
   price: number;
@@ -46,6 +48,65 @@ export interface EventZone {
   zone_name: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Curated country list for the event country picker (ISO 3166-1 alpha-2). */
+export const COUNTRIES: readonly { code: string; name: string }[] = [
+  { code: 'NL', name: 'Netherlands' },
+  { code: 'BE', name: 'Belgium' },
+  { code: 'DE', name: 'Germany' },
+  { code: 'FR', name: 'France' },
+  { code: 'ES', name: 'Spain' },
+  { code: 'PT', name: 'Portugal' },
+  { code: 'IT', name: 'Italy' },
+  { code: 'GB', name: 'United Kingdom' },
+  { code: 'IE', name: 'Ireland' },
+  { code: 'AT', name: 'Austria' },
+  { code: 'CH', name: 'Switzerland' },
+  { code: 'LU', name: 'Luxembourg' },
+  { code: 'DK', name: 'Denmark' },
+  { code: 'NO', name: 'Norway' },
+  { code: 'SE', name: 'Sweden' },
+  { code: 'FI', name: 'Finland' },
+  { code: 'IS', name: 'Iceland' },
+  { code: 'PL', name: 'Poland' },
+  { code: 'CZ', name: 'Czechia' },
+  { code: 'SK', name: 'Slovakia' },
+  { code: 'HU', name: 'Hungary' },
+  { code: 'RO', name: 'Romania' },
+  { code: 'BG', name: 'Bulgaria' },
+  { code: 'GR', name: 'Greece' },
+  { code: 'HR', name: 'Croatia' },
+  { code: 'SI', name: 'Slovenia' },
+  { code: 'EE', name: 'Estonia' },
+  { code: 'LV', name: 'Latvia' },
+  { code: 'LT', name: 'Lithuania' },
+  { code: 'MT', name: 'Malta' },
+  { code: 'CY', name: 'Cyprus' },
+  { code: 'TR', name: 'Türkiye' },
+  { code: 'US', name: 'United States' },
+  { code: 'CA', name: 'Canada' },
+  { code: 'MX', name: 'Mexico' },
+  { code: 'BR', name: 'Brazil' },
+  { code: 'AR', name: 'Argentina' },
+  { code: 'JP', name: 'Japan' },
+  { code: 'KR', name: 'South Korea' },
+  { code: 'IN', name: 'India' },
+  { code: 'AE', name: 'United Arab Emirates' },
+  { code: 'ZA', name: 'South Africa' },
+  { code: 'AU', name: 'Australia' },
+  { code: 'NZ', name: 'New Zealand' },
+] as const;
+
+/**
+ * Convert an ISO 3166-1 alpha-2 country code (e.g. "NL") into its flag emoji
+ * (🇳🇱). Returns '' for null/empty/invalid codes so callers can render nothing.
+ */
+export function getFlagEmoji(countryCode: string | null | undefined): string {
+  if (!countryCode) return '';
+  const code = countryCode.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return '';
+  return String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
 }
 
 /** A declared winner for an event. One row per event (unique constraint).

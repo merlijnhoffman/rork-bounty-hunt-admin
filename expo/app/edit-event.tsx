@@ -14,7 +14,7 @@ import {
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { Event, EVENT_COLORS, DEFAULT_ACCENT_COLOR } from '@/types';
+import { Event, EVENT_COLORS, DEFAULT_ACCENT_COLOR, COUNTRIES, getFlagEmoji } from '@/types';
 import Colors from '@/constants/colors';
 import { BountyAccessCodeEditor } from '@/components/BountyAccessCodeEditor';
 
@@ -24,6 +24,8 @@ export default function EditEventScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [city, setCity] = useState<string>('');
+  const [title, setTitle] = useState<string>('');
+  const [country, setCountry] = useState<string>('');
   const [date, setDate] = useState<string>('');
   const [startTime, setStartTime] = useState<string>('');
   const [accentColor, setAccentColor] = useState<string>(DEFAULT_ACCENT_COLOR);
@@ -50,6 +52,8 @@ export default function EditEventScreen() {
     if (eventQuery.data) {
       const e = eventQuery.data;
       setCity(e.city);
+      setTitle(e.title ?? '');
+      setCountry(e.country ?? '');
       setDate(e.date);
       setStartTime(e.start_time);
       setAccentColor(e.accent_color ?? DEFAULT_ACCENT_COLOR);
@@ -64,8 +68,9 @@ export default function EditEventScreen() {
   const updateMutation = useMutation({
     mutationFn: async () => {
       const updateData: Record<string, unknown> = {
-        title: city.trim(),
+        title: title.trim() || city.trim(),
         city: city.trim(),
+        country: country || null,
         date: date.trim(),
         start_time: startTime.trim(),
         accent_color: accentColor,
@@ -139,6 +144,50 @@ export default function EditEventScreen() {
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <EditField label="LOCATION" value={city} onChangeText={setCity} />
+          <EditField
+            label="TITLE (OPTIONAL — DEFAULTS TO CITY)"
+            value={title}
+            onChangeText={setTitle}
+            placeholder="Night Hunt Amsterdam"
+          />
+          {/* Country Picker */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>COUNTRY</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.countryRow}
+            >
+              {COUNTRIES.map((c) => {
+                const selected = country === c.code;
+                return (
+                  <TouchableOpacity
+                    key={c.code}
+                    style={[
+                      styles.countryChip,
+                      selected && { borderColor: accentColor, backgroundColor: accentColor },
+                    ]}
+                    onPress={() => setCountry(selected ? '' : c.code)}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.countryChipText,
+                        selected && styles.countryChipTextSelected,
+                      ]}
+                    >
+                      {getFlagEmoji(c.code)} {c.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <Text style={styles.colorHint}>
+              {country
+                ? `${getFlagEmoji(country)} ${COUNTRIES.find((c) => c.code === country)?.name} — shown with the flag on the player app`
+                : 'Not set — pick the country for the player app flag'}
+            </Text>
+          </View>
           <View style={styles.row}>
             <View style={styles.halfField}>
               <EditField label="DATE" value={date} onChangeText={setDate} placeholder="2026-04-15" />
@@ -332,6 +381,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textMuted,
     paddingTop: 2,
+  },
+  countryRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 4,
+  },
+  countryChip: {
+    borderWidth: 1,
+    borderColor: Colors.inputBorder,
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: Colors.inputBg,
+  },
+  countryChipText: {
+    fontSize: 13,
+    color: Colors.white,
+    fontWeight: '600' as const,
+  },
+  countryChipTextSelected: {
+    color: Colors.bg,
+    fontWeight: '700' as const,
   },
   freeToggle: {
     flexDirection: 'row',
