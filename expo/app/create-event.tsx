@@ -23,7 +23,6 @@ export default function CreateEventScreen() {
   const queryClient = useQueryClient();
 
   const [city, setCity] = useState<string>('');
-  const [title, setTitle] = useState<string>('');
   const [country, setCountry] = useState<string>('');
   const [date, setDate] = useState<string>('');
   const [startTime, setStartTime] = useState<string>('');
@@ -37,7 +36,7 @@ export default function CreateEventScreen() {
     mutationFn: async () => {
       if (__DEV__) console.log('[CreateEvent] Creating event:', city);
       const insertData: Record<string, unknown> = {
-        title: title.trim() || city.trim(),
+        title: city.trim(),
         city: city.trim(),
         country: country || null,
         date: date.trim(),
@@ -86,12 +85,6 @@ export default function CreateEventScreen() {
             value={city}
             onChangeText={setCity}
             placeholder="Amsterdam"
-          />
-          <InputField
-            label="TITLE (OPTIONAL — DEFAULTS TO CITY)"
-            value={title}
-            onChangeText={setTitle}
-            placeholder="Night Hunt Amsterdam"
           />
           {/* Country Picker */}
           <View style={styles.inputGroup}>

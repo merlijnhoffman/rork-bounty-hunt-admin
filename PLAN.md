@@ -22,7 +22,7 @@ A sleek, dark command-center style admin app for managing live treasure hunt eve
 - Confirmation alerts before any destructive action
 - Real-time updates via Supabase subscriptions (events, clues, tickets, connections, event_zones)
 - Prize Pool editor on event detail: set starting prize (prize_base) and per-ticket contribution (prize_per_ticket), with a live pool summary from the event_prize_pool view refreshed every 15s
-- Hunt title and country fields on create/edit event: title can differ from the city (defaults to city when blank), country is an ISO 3166-1 alpha-2 code picked from a chip list — the player app derives the flag emoji and uses these for its next-hunt preview
+- Country picker on create/edit event, shown under the city field: country is an ISO 3166-1 alpha-2 code picked from a chip list (title always equals the city) — the player app derives the flag emoji from `events.country` and uses it for its next-hunt preview
 
 **Design**
 - Dark, minimal "command center" aesthetic — inspired by mission control dashboards

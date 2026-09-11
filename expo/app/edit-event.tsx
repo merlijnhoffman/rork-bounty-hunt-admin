@@ -24,7 +24,6 @@ export default function EditEventScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [city, setCity] = useState<string>('');
-  const [title, setTitle] = useState<string>('');
   const [country, setCountry] = useState<string>('');
   const [date, setDate] = useState<string>('');
   const [startTime, setStartTime] = useState<string>('');
@@ -52,7 +51,6 @@ export default function EditEventScreen() {
     if (eventQuery.data) {
       const e = eventQuery.data;
       setCity(e.city);
-      setTitle(e.title ?? '');
       setCountry(e.country ?? '');
       setDate(e.date);
       setStartTime(e.start_time);
@@ -68,7 +66,7 @@ export default function EditEventScreen() {
   const updateMutation = useMutation({
     mutationFn: async () => {
       const updateData: Record<string, unknown> = {
-        title: title.trim() || city.trim(),
+        title: city.trim(),
         city: city.trim(),
         country: country || null,
         date: date.trim(),
@@ -144,12 +142,6 @@ export default function EditEventScreen() {
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <EditField label="LOCATION" value={city} onChangeText={setCity} />
-          <EditField
-            label="TITLE (OPTIONAL — DEFAULTS TO CITY)"
-            value={title}
-            onChangeText={setTitle}
-            placeholder="Night Hunt Amsterdam"
-          />
           {/* Country Picker */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>COUNTRY</Text>
