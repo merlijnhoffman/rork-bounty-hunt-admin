@@ -6,6 +6,10 @@ export interface Event {
   start_time: string;
   price: number;
   prize_amount: number;
+  /** Base prize in EUR (starting pool). Added by migration 0006. */
+  prize_base: number;
+  /** EUR added to the pool per ticket sold. Added by migration 0006. */
+  prize_per_ticket: number;
   accent_color: string | null;
   bounty_access_code: string | null;
   is_active: boolean;
@@ -97,6 +101,12 @@ export interface Ticket {
   verification_code: string;
   status: string;
   created_at: string;
+}
+
+/** One row per event from the `event_prize_pool` view: count of ticket holders. */
+export interface EventPrizePool {
+  event_id: string;
+  player_count: number;
 }
 
 export interface Profile {

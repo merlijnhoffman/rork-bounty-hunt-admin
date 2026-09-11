@@ -21,6 +21,7 @@ A sleek, dark command-center style admin app for managing live treasure hunt eve
 - Pull-to-refresh on all list screens
 - Confirmation alerts before any destructive action
 - Real-time updates via Supabase subscriptions (events, clues, tickets, connections, event_zones)
+- Prize Pool editor on event detail: set starting prize (prize_base) and per-ticket contribution (prize_per_ticket), with a live pool summary from the event_prize_pool view refreshed every 15s
 
 **Design**
 - Dark, minimal "command center" aesthetic — inspired by mission control dashboards
@@ -44,6 +45,8 @@ A sleek, dark command-center style admin app for managing live treasure hunt eve
 
 **Database**
 - `event_zones` — one row per event. Columns: event_id (PK, FK→events), center_latitude, center_longitude, initial_radius, narrowed_percent (0–100), zone_name, created_at, updated_at. The user app computes `current_radius = initial_radius * (1 - narrowed_percent/100)`.
+- `events.prize_base` / `events.prize_per_ticket` — integer columns (defaults 500/10) for the prize pool parameters; editable on the event detail screen, saving bumps updated_at.
+- `event_prize_pool` view — one row per event with the ticket-holder count (player_count), used for the live pool summary (prize = prize_base + prize_per_ticket × player_count).
 
 **App Icon**
 - A dark background with a glowing cyan crosshair/target symbol, evoking a treasure hunt command center

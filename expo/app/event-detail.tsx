@@ -52,6 +52,7 @@ import {
   EventZone,
   EventWinner,
   BountyLocation,
+  EventPrizePool,
   DEFAULT_ACCENT_COLOR,
   ZONE_RADIUS_MIN as ZONE_RADIUS_MIN_CONST,
   ZONE_RADIUS_MAX,
@@ -255,6 +256,10 @@ export default function EventDetailScreen() {
   const zoneSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bountyCode, setBountyCode] = useState<string>('');
 
+  // --- Prize pool state ---
+  const [prizeBaseInput, setPrizeBaseInput] = useState<string>('');
+  const [prizePerTicketInput, setPrizePerTicketInput] = useState<string>('');
+
   // --- Queries ---
   const eventQuery = useQuery({
     queryKey: ['event', id],
@@ -333,6 +338,13 @@ export default function EventDetailScreen() {
   useEffect(() => {
     setBountyCode(eventQuery.data?.bounty_access_code ?? '');
   }, [eventQuery.data?.bounty_access_code]);
+
+  // Sync prize pool inputs from the event row (falls back to 0 while the
+  // prize columns don't exist yet, i.e. before migration 0006 is applied).
+  useEffect(() => {
+    setPrizeBaseInput(String(eventQuery.data?.prize_base ?? 0));
+    setPrizePerTicketInput(String(eventQuery.data?.prize_per_ticket ?? 0));
+  }, [eventQuery.data?.prize_base, eventQuery.data?.prize_per_ticket]);
 
   // --- Event winner query ---
   // One row per event (unique constraint). Written by the declare-winner edge
@@ -442,6 +454,63 @@ export default function EventDetailScreen() {
       void supabase.removeChannel(channel);
     };
   }, [id, queryClient]);
+
+  // --- Prize pool query ---
+  // Live ticket-holder count from the event_prize_pool view, polled every 15s
+  // so the pool summary grows as tickets are sold.
+  const prizePoolQuery = useQuery({
+    queryKey: ['prizePool', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('event_prize_pool')
+        .select('event_id, player_count')
+        .eq('event_id', id)
+        .maybeSingle();
+      if (error) throw error;
+      return data as EventPrizePool | null;
+    },
+    enabled: !!id,
+    refetchInterval: 15000,
+  });
+
+  // --- Prize pool mutation ---
+  // Saves prize_base / prize_per_ticket on the events row and bumps
+  // updated_at so the player apps pick up the change.
+  const prizePoolMutation = useMutation({
+    mutationFn: async (values: { prizeBase: number; prizePerTicket: number }) => {
+      const { error } = await supabase
+        .from('events')
+        .update({
+          prize_base: values.prizeBase,
+          prize_per_ticket: values.prizePerTicket,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['event', id] });
+      void queryClient.invalidateQueries({ queryKey: ['events'] });
+      Alert.alert('Prize pool updated', 'The new values are live for players.');
+    },
+    onError: (error: Error) => {
+      Alert.alert('Error', error.message);
+    },
+  });
+
+  const handleSavePrizePool = useCallback(() => {
+    const prizeBase = parseInt(prizeBaseInput, 10);
+    const prizePerTicket = parseInt(prizePerTicketInput, 10);
+    if (!Number.isFinite(prizeBase) || prizeBase < 0) {
+      Alert.alert('Invalid value', 'Starting prize must be a non-negative number.');
+      return;
+    }
+    if (!Number.isFinite(prizePerTicket) || prizePerTicket < 0) {
+      Alert.alert('Invalid value', 'Added per ticket must be a non-negative number.');
+      return;
+    }
+    prizePoolMutation.mutate({ prizeBase, prizePerTicket });
+  }, [prizeBaseInput, prizePerTicketInput, prizePoolMutation]);
 
   // --- Status mutation ---
   const statusMutation = useMutation({
@@ -1200,6 +1269,12 @@ export default function EventDetailScreen() {
         : (parseInt(zoneCurrentRadiusMeters) || 0))
     : null;
 
+  // --- Prize pool computed values ---
+  const prizeBase = event?.prize_base ?? 0;
+  const prizePerTicket = event?.prize_per_ticket ?? 0;
+  const playerCount = prizePoolQuery.data?.player_count ?? 0;
+  const totalPrize = prizeBase + prizePerTicket * playerCount;
+
   if (eventQuery.isLoading) {
     return (
       <>
@@ -1286,6 +1361,56 @@ export default function EventDetailScreen() {
           <View style={detailStyles.infoRow}>
             <Text style={detailStyles.infoLabel}>Status</Text>
             <StatusBadge status={event.status} accent={accent} />
+          </View>
+        </View>
+
+        {/* Prize Pool */}
+        <Text style={detailStyles.sectionTitle}>PRIZE POOL</Text>
+        <View style={detailStyles.infoCard}>
+          <View style={detailStyles.prizeInputsRow}>
+            <View style={detailStyles.prizeField}>
+              <Text style={detailStyles.prizeFieldLabel}>STARTING PRIZE (€)</Text>
+              <TextInput
+                style={detailStyles.input}
+                value={prizeBaseInput}
+                onChangeText={setPrizeBaseInput}
+                keyboardType="number-pad"
+                placeholder="500"
+                placeholderTextColor={Colors.textSecondary}
+              />
+            </View>
+            <View style={detailStyles.prizeField}>
+              <Text style={detailStyles.prizeFieldLabel}>ADDED PER TICKET (€)</Text>
+              <TextInput
+                style={detailStyles.input}
+                value={prizePerTicketInput}
+                onChangeText={setPrizePerTicketInput}
+                keyboardType="number-pad"
+                placeholder="10"
+                placeholderTextColor={Colors.textSecondary}
+              />
+            </View>
+          </View>
+          <TouchableOpacity
+            style={[detailStyles.zoneSaveBtn, { backgroundColor: accent }]}
+            onPress={handleSavePrizePool}
+            disabled={prizePoolMutation.isPending}
+            activeOpacity={0.7}
+          >
+            {prizePoolMutation.isPending ? (
+              <ActivityIndicator size="small" color={Colors.bg} />
+            ) : (
+              <>
+                <Trophy size={15} color={Colors.bg} />
+                <Text style={detailStyles.zoneSaveBtnText}>SAVE PRIZE POOL</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <View style={detailStyles.prizeSummaryBox}>
+            <Text style={detailStyles.prizeSummaryText}>
+              €{prizeBase} + €{prizePerTicket} × {playerCount} hunter{playerCount === 1 ? '' : 's'}
+              {' '}= <Text style={detailStyles.prizeSummaryTotal}>€{totalPrize} prize pool</Text>
+            </Text>
           </View>
         </View>
 
@@ -2071,6 +2196,38 @@ const detailStyles = StyleSheet.create({
     fontSize: 14,
     color: Colors.white,
     fontWeight: '600' as const,
+  },
+  prizeInputsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  prizeField: {
+    flex: 1,
+    gap: 6,
+  },
+  prizeFieldLabel: {
+    fontSize: 10,
+    letterSpacing: 1.2,
+    fontWeight: '700' as const,
+    color: Colors.textSecondary,
+  },
+  prizeSummaryBox: {
+    backgroundColor: Colors.inputBg,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  prizeSummaryText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  prizeSummaryTotal: {
+    color: Colors.amber,
+    fontWeight: '700' as const,
   },
   badge: {
     flexDirection: 'row',
