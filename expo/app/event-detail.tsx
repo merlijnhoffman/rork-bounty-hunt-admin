@@ -849,8 +849,8 @@ export default function EventDetailScreen() {
 
       // Wipe gameplay data first. If a delete fails (e.g. RLS blocks it),
       // continue with the remaining tables and report failures at the end.
-      // 'tickets' is included so the hunter count — and with it the prize pool
-      // summary from event_prize_pool — resets to the starting amount.
+      // Tickets are NOT cleared here — signed-up players keep their purchase;
+      // use the separate "Reset Tickets" action to zero the prize pool.
       const tablesToClear = [
         'clues',
         'event_winners',
@@ -858,7 +858,6 @@ export default function EventDetailScreen() {
         'bounty_locations',
         'hunter_locations',
         'connection_codes',
-        'tickets',
       ] as const;
 
       const failedTables: string[] = [];
@@ -920,14 +919,39 @@ export default function EventDetailScreen() {
           `The hunt was reset, but these tables could not be cleared: ${failed.join(', ')}. Remove them via the Supabase dashboard if needed.`,
         );
       } else {
-        Alert.alert(
-          'Hunt reset',
-          'All gameplay data was cleared, the hunter count was reset, and the hunt is back to scheduled. The prize pool is back to its starting amount.',
-        );
+        Alert.alert('Hunt reset', 'All gameplay data was cleared and the hunt is back to scheduled. Signed-up players and their tickets are kept.');
       }
     },
     onError: (error: Error) => {
       Alert.alert('Error', error.message);
+    },
+  });
+
+  // --- Reset tickets ---
+  // Deletes all ticket rows for this event so the hunter count — and with it
+  // the prize pool summary from event_prize_pool — resets to the starting
+  // amount. Players keep their accounts; only the purchase rows are removed.
+  const resetTicketsMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from('tickets')
+        .delete()
+        .eq('event_id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['prizePool', id] });
+      void queryClient.invalidateQueries({ queryKey: ['events'] });
+      Alert.alert(
+        'Tickets reset',
+        'All tickets for this event were removed. The prize pool is back to its starting amount.',
+      );
+    },
+    onError: (error: Error) => {
+      Alert.alert(
+        'Could not reset tickets',
+        `${error.message}\n\nIf this mentions a row-level security policy, the admin delete policy on tickets is missing or does not match your login email.`,
+      );
     },
   });
 
@@ -1083,6 +1107,17 @@ export default function EventDetailScreen() {
       ],
     );
   }, [resetMutation]);
+
+  const handleResetTickets = useCallback(() => {
+    Alert.alert(
+      'Reset Tickets',
+      'This will permanently DELETE every ticket for this event and reset the prize pool to its starting amount. Players keep their accounts but lose their purchase. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reset Tickets', style: 'destructive', onPress: () => resetTicketsMutation.mutate() },
+      ],
+    );
+  }, [resetTicketsMutation]);
 
   const handleDeleteClue = useCallback((clueId: string) => {
     Alert.alert('Delete Clue', 'Are you sure you want to delete this clue?', [
@@ -1419,6 +1454,22 @@ export default function EventDetailScreen() {
               {' '}= <Text style={detailStyles.prizeSummaryTotal}>€{totalPrize} prize pool</Text>
             </Text>
           </View>
+          <TouchableOpacity
+            style={[detailStyles.resetButton, { marginTop: 12 }]}
+            onPress={handleResetTickets}
+            disabled={resetTicketsMutation.isPending}
+            activeOpacity={0.7}
+            testID="reset-tickets-button"
+          >
+            {resetTicketsMutation.isPending ? (
+              <ActivityIndicator color={Colors.amber} size="small" />
+            ) : (
+              <>
+                <RotateCcw size={18} color={Colors.amber} />
+                <Text style={detailStyles.resetButtonText}>RESET TICKETS</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Bounty Access Code */}

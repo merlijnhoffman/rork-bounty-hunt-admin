@@ -23,6 +23,8 @@ A sleek, dark command-center style admin app for managing live treasure hunt eve
 - Real-time updates via Supabase subscriptions (events, clues, tickets, connections, event_zones)
 - Prize Pool editor on event detail: set starting prize (prize_base) and per-ticket contribution (prize_per_ticket), with a live pool summary from the event_prize_pool view refreshed every 15s
 - Country picker on create/edit event, shown under the city field: country is an ISO 3166-1 alpha-2 code picked from a chip list (title always equals the city) — the player app derives the flag emoji from `events.country` and uses it for its next-hunt preview
+- Reset Hunt clears gameplay data only (clues, winner, connections, bounty/hunter locations) and keeps signed-up players and their tickets
+- Separate "Reset Tickets" button in the Prize Pool card (with confirmation): deletes all ticket rows for the event so the hunter count and prize pool reset to the starting amount, without making players purchase again
 
 **Design**
 - Dark, minimal "command center" aesthetic — inspired by mission control dashboards
