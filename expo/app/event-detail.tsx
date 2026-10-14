@@ -849,6 +849,8 @@ export default function EventDetailScreen() {
 
       // Wipe gameplay data first. If a delete fails (e.g. RLS blocks it),
       // continue with the remaining tables and report failures at the end.
+      // 'tickets' is included so the hunter count — and with it the prize pool
+      // summary from event_prize_pool — resets to the starting amount.
       const tablesToClear = [
         'clues',
         'event_winners',
@@ -856,6 +858,7 @@ export default function EventDetailScreen() {
         'bounty_locations',
         'hunter_locations',
         'connection_codes',
+        'tickets',
       ] as const;
 
       const failedTables: string[] = [];
@@ -908,6 +911,7 @@ export default function EventDetailScreen() {
       void queryClient.invalidateQueries({ queryKey: ['bountyLocation', id] });
       void queryClient.invalidateQueries({ queryKey: ['eventWinner', id] });
       void queryClient.invalidateQueries({ queryKey: ['clues', id] });
+      void queryClient.invalidateQueries({ queryKey: ['prizePool', id] });
 
       const failed = result?.failedTables ?? [];
       if (failed.length > 0) {
@@ -916,7 +920,10 @@ export default function EventDetailScreen() {
           `The hunt was reset, but these tables could not be cleared: ${failed.join(', ')}. Remove them via the Supabase dashboard if needed.`,
         );
       } else {
-        Alert.alert('Hunt reset', 'All gameplay data was cleared and the hunt is back to scheduled.');
+        Alert.alert(
+          'Hunt reset',
+          'All gameplay data was cleared, the hunter count was reset, and the hunt is back to scheduled. The prize pool is back to its starting amount.',
+        );
       }
     },
     onError: (error: Error) => {
