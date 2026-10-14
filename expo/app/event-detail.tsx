@@ -1398,7 +1398,8 @@ export default function EventDetailScreen() {
           </View>
           <View style={detailStyles.infoRow}>
             <Text style={detailStyles.infoLabel}>Prize</Text>
-            <Text style={[detailStyles.infoValue, { color: Colors.amber }]}>€{event.prize_amount}</Text>
+            {/* Live prize pool total, not the legacy prize_amount column */}
+            <Text style={[detailStyles.infoValue, { color: Colors.amber }]}>€{totalPrize}</Text>
           </View>
           <View style={detailStyles.infoRow}>
             <Text style={detailStyles.infoLabel}>Status</Text>
