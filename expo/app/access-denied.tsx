@@ -16,9 +16,9 @@ export default function AccessDeniedScreen() {
         <View style={styles.iconContainer}>
           <ShieldOff size={56} color={Colors.red} strokeWidth={1.5} />
         </View>
-        <Text style={styles.title}>ACCESS DENIED</Text>
+        <Text style={styles.title}>NOT AUTHORIZED</Text>
         <Text style={styles.message}>
-          Your account does not have admin privileges. Contact the system administrator for access.
+          Your account is not in the admins list, so you cannot access this control panel. Sign in with an admin account or ask the administrator to add you.
         </Text>
         <TouchableOpacity
           style={styles.button}

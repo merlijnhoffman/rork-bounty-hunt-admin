@@ -5,7 +5,7 @@
 A sleek, dark command-center style admin app for managing live treasure hunt events. Dark backgrounds (#0A0A0A/#1A1A1A) with cyan (#00D4FF) accents and red (#FF6B6B) for destructive actions. Stack-based navigation — no tabs.
 
 **Features**
-- Sign in with email and password; only admin users can access the app
+- Sign in with email and password; access is gated by the `admins` table — only a signed-in user whose id has a row there (user_id = auth.uid()) can reach the app, everyone else sees "Not authorized"
 - View all events in a dashboard sorted by date, with status badges and ticket counts
 - Create new treasure hunt events with city, date, time, pricing, and prize
 - Control live events: start hunts, end hunts, and manage status transitions
@@ -51,7 +51,8 @@ A sleek, dark command-center style admin app for managing live treasure hunt eve
 - `events.prize_base` / `events.prize_per_ticket` — integer columns (defaults 500/10) for the prize pool parameters; editable on the event detail screen, saving bumps updated_at.
 - `event_prize_pool` view — one row per event with the ticket-holder count (player_count), used for the live pool summary (prize = prize_base + prize_per_ticket × player_count).
 - `events.country` — nullable ISO 3166-1 alpha-2 code (e.g. "NL"); flag emoji is derived client-side, no lookup table needed. Added by migration 0006.
-- `tickets` RLS delete policy (migration 0008) — mirrors the app's admin check: profile `is_admin = true` OR the allowlisted email. The event info card's Prize row shows the live computed pool total, not the legacy `events.prize_amount` column.
+- `admins` table — the admin allowlist: rows of user_id (UUID, references auth users). RLS lets each signed-in user read their own row; the app queries it with `.maybeSingle()` and treats no row as "Not authorized". Add new admins by inserting their auth user id.
+- `tickets` RLS delete policy (migration 0009) — plain `FOR DELETE TO authenticated USING (true)`, consistent with the other gameplay tables (an earlier profile/allowlist-based policy silently deleted 0 rows). Tighten to a service-role edge function once real players sign up. The event info card's Prize row shows the live computed pool total, not the legacy `events.prize_amount` column.
 
 **App Icon**
 - A dark background with a glowing cyan crosshair/target symbol, evoking a treasure hunt command center

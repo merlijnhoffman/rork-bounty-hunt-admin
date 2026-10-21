@@ -2,21 +2,6 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import createContextHook from '@nkzw/create-context-hook';
 import { supabase } from '@/lib/supabase';
-import { Profile } from '@/types';
-
-/**
- * Hardcoded fallback list of admin emails. Used if the profile row cannot be
- * fetched (for example, due to RLS policies blocking SELECT on `profiles`).
- * These users will be granted admin access regardless of the database state.
- */
-const ADMIN_EMAIL_ALLOWLIST: readonly string[] = [
-  'merlijnhoffman@gmail.com',
-] as const;
-
-const isAllowlistedAdmin = (email: string | null | undefined): boolean => {
-  if (!email) return false;
-  return ADMIN_EMAIL_ALLOWLIST.includes(email.trim().toLowerCase());
-};
 
 const log = (...args: unknown[]): void => {
   if (__DEV__) console.log(...args);
@@ -29,58 +14,56 @@ const logError = (...args: unknown[]): void => {
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
-  const [profileLoading, setProfileLoading] = useState<boolean>(false);
 
-  const fetchProfile = useCallback(async (authUser: User) => {
-    setProfileLoading(true);
+  /**
+   * Admin gate: the signed-in user must have a row in the `admins` table
+   * where user_id equals their auth user id (RLS lets admins read their
+   * own row). No row → not authorized.
+   */
+  const checkAdminAccess = useCallback(async (authUser: User) => {
     try {
-      log('[Auth] Fetching profile for user');
+      log('[Auth] Checking admins table for user');
       const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', authUser.id)
-        .single();
-
-      const allowlisted = isAllowlistedAdmin(authUser.email);
+        .from('admins')
+        .select('user_id')
+        .eq('user_id', authUser.id)
+        .maybeSingle();
 
       if (error) {
-        logError('[Auth] Profile fetch error:', JSON.stringify({
+        logError('[Auth] Admins check error:', JSON.stringify({
           message: error.message,
           code: error.code,
           details: error.details,
           hint: error.hint,
         }));
-        setProfile(null);
-        // Fall back to the allowlist so RLS issues don't lock out admins.
-        setIsAdmin(allowlisted);
+        setIsAdmin(false);
         return;
       }
 
-      log('[Auth] Profile fetched, isAdmin:', data?.is_admin);
-      setProfile(data as Profile);
-      setIsAdmin(data?.is_admin === true || allowlisted);
+      const admin = data != null;
+      log('[Auth] Admin row found:', admin);
+      setIsAdmin(admin);
     } catch (err) {
       const e = err as Error;
-      logError('[Auth] Profile fetch exception:', e?.message ?? String(err));
-      setProfile(null);
-      setIsAdmin(isAllowlistedAdmin(authUser.email));
-    } finally {
-      setProfileLoading(false);
+      logError('[Auth] Admins check exception:', e?.message ?? String(err));
+      setIsAdmin(false);
     }
   }, []);
 
   useEffect(() => {
     log('[Auth] Initializing auth listener');
 
+    // Supabase persists the session in AsyncStorage (persistSession in
+    // lib/supabase.ts), so a stored session is restored here on app start
+    // and the user stays logged in across launches.
     void supabase.auth.getSession().then(({ data: { session: s } }) => {
       log('[Auth] Initial session loaded');
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) {
-        void fetchProfile(s.user).finally(() => setIsLoading(false));
+        void checkAdminAccess(s.user).finally(() => setIsLoading(false));
       } else {
         setIsLoading(false);
       }
@@ -92,39 +75,40 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         setSession(s);
         setUser(s?.user ?? null);
         if (s?.user) {
-          void fetchProfile(s.user);
+          void checkAdminAccess(s.user);
         } else {
-          setProfile(null);
           setIsAdmin(false);
         }
       }
     );
 
     return () => subscription.unsubscribe();
-  }, [fetchProfile]);
+  }, [checkAdminAccess]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     log('[Auth] Signing in');
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
-  }, []);
+    if (data.user) {
+      // Gate immediately: a signed-in non-admin never reaches the dashboard.
+      await checkAdminAccess(data.user);
+    }
+  }, [checkAdminAccess]);
 
   const signOut = useCallback(async () => {
     log('[Auth] Signing out');
     await supabase.auth.signOut();
     setSession(null);
     setUser(null);
-    setProfile(null);
     setIsAdmin(false);
   }, []);
 
   return useMemo(() => ({
     session,
     user,
-    profile,
-    isLoading: isLoading || profileLoading,
+    isLoading,
     isAdmin,
     signIn,
     signOut,
-  }), [session, user, profile, isLoading, profileLoading, isAdmin, signIn, signOut]);
+  }), [session, user, isLoading, isAdmin, signIn, signOut]);
 });
