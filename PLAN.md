@@ -53,6 +53,7 @@ A sleek, dark command-center style admin app for managing live treasure hunt eve
 - `events.country` — nullable ISO 3166-1 alpha-2 code (e.g. "NL"); flag emoji is derived client-side, no lookup table needed. Added by migration 0006.
 - `admins` table — the admin allowlist: rows of user_id (UUID, references auth users). RLS lets each signed-in user read their own row; the app queries it with `.maybeSingle()` and treats no row as "Not authorized". Add new admins by inserting their auth user id.
 - `tickets` RLS delete policy (migration 0009) — plain `FOR DELETE TO authenticated USING (true)`, consistent with the other gameplay tables (an earlier profile/allowlist-based policy silently deleted 0 rows). Tighten to a service-role edge function once real players sign up. The event info card's Prize row shows the live computed pool total, not the legacy `events.prize_amount` column.
+- Hunter Connect delete policies (migration 0010) — `player_connections` and `connection_codes` get plain `FOR DELETE TO authenticated USING (true)` policies so Reset Hunt actually clears them: `connection_codes` was owner-scoped (`FOR ALL USING (auth.uid() = user_id)`) and `player_connections` had no delete policy, so the admin's deletes silently matched 0 rows.
 
 **App Icon**
 - A dark background with a glowing cyan crosshair/target symbol, evoking a treasure hunt command center

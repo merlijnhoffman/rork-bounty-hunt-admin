@@ -1,9 +1,9 @@
 -- 0009: Simplify the tickets delete policy to match the other gameplay tables.
--- Every table the admin app resets (clues, event_winners, player_connections,
--- bounty_locations, hunter_locations, connection_codes) uses a plain
--- "authenticated can delete" policy and those deletes work. The email/profile
--- matching on tickets kept failing silently (RLS deletes 0 rows without
--- erroring), so tickets now uses the same pattern.
+-- The email/profile matching on tickets kept failing silently (RLS deletes 0
+-- rows without erroring), so tickets now uses the same plain pattern as
+-- clues, event_winners, bounty_locations and hunter_locations.
+-- NOTE: player_connections and connection_codes did NOT have working delete
+-- policies (fixed separately in 0010) — see that migration.
 -- Safe to re-run: DROP POLICY IF EXISTS before CREATE.
 
 ALTER TABLE tickets ENABLE ROW LEVEL SECURITY;
