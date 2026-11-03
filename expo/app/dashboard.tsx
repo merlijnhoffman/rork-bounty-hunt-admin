@@ -75,15 +75,22 @@ export default function DashboardScreen() {
 
       if (error) throw error;
 
-      const eventsWithCounts: Event[] = await Promise.all(
-        (events ?? []).map(async (event: Event) => {
-          const { count } = await supabase
-            .from('tickets')
-            .select('*', { count: 'exact', head: true })
-            .eq('event_id', event.id);
-          return { ...event, ticket_count: count ?? 0 };
-        })
+      // Ticket counts come from the `event_prize_pool` view (same source as
+      // the Prize Pool card). Counting the `tickets` table directly does NOT
+      // work: RLS silently filters rows the admin doesn't own, so the count
+      // always comes back 0. The view bypasses RLS and returns the real count.
+      const { data: poolRows, error: poolError } = await supabase
+        .from('event_prize_pool')
+        .select('event_id, player_count');
+      if (poolError) throw poolError;
+      const poolMap = new Map<string, number>(
+        (poolRows ?? []).map((row) => [row.event_id, row.player_count])
       );
+
+      const eventsWithCounts: Event[] = (events ?? []).map((event: Event) => ({
+        ...event,
+        ticket_count: poolMap.get(event.id) ?? 0,
+      }));
 
       if (__DEV__) console.log('[Dashboard] Fetched events:', eventsWithCounts.length);
       return eventsWithCounts;
@@ -210,6 +217,14 @@ export default function DashboardScreen() {
 
   const renderEvent = useCallback(({ item }: { item: Event }) => {
     const accent = item.accent_color ?? DEFAULT_ACCENT_COLOR;
+    // Live pool total: prize_base + prize_per_ticket × ticket holders — the
+    // same formula as the event detail Prize Pool card. Events created before
+    // the pool columns exist have no prize_base, so fall back to prize_amount.
+    const ticketCount = item.ticket_count ?? 0;
+    const totalPrize =
+      item.prize_base != null
+        ? item.prize_base + (item.prize_per_ticket ?? 0) * ticketCount
+        : item.prize_amount;
     return (
     <TouchableOpacity
       style={styles.card}
@@ -232,11 +247,11 @@ export default function DashboardScreen() {
         </View>
         <View style={styles.detailItem}>
           <Ticket size={13} color={Colors.textMuted} />
-          <Text style={styles.detailText}>{item.ticket_count ?? 0} tickets</Text>
+          <Text style={styles.detailText}>{ticketCount} tickets</Text>
         </View>
         <View style={styles.detailItem}>
           <Trophy size={13} color={Colors.amber} />
-          <Text style={[styles.detailText, { color: Colors.amber }]}>€{item.prize_amount}</Text>
+          <Text style={[styles.detailText, { color: Colors.amber }]}>€{totalPrize}</Text>
         </View>
       </View>
 
