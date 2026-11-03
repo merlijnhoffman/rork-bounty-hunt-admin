@@ -1,0 +1,4 @@
+[submodule "player-app"]
+	path = player-app
+	url = https://github.com/merlijnhoffman/rork-rork-bounty---urban-scavenger-hunt.git
+	branch = main
