@@ -15,6 +15,8 @@ const Colors = {
   amberDim: 'rgba(255, 184, 0, 0.1)',
   grey: '#888888',
   greyDim: 'rgba(136, 136, 136, 0.1)',
+  liveGreen: '#22C55E',
+  liveGreenDim: 'rgba(34, 197, 94, 0.1)',
   light: {
     text: '#000',
     background: '#fff',
