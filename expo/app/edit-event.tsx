@@ -75,6 +75,8 @@ export default function EditEventScreen() {
         price: isFree ? 0 : parseFloat(price),
         prize_amount: parseFloat(prizeAmount),
         bounty_access_code: bountyAccessCode.trim() || null,
+        // Bump updated_at so player apps (which watch it) pick up the change.
+        updated_at: new Date().toISOString(),
       };
       if (__DEV__) console.log('[EditEvent] Updating event:', id, 'with data:', JSON.stringify(updateData));
 
